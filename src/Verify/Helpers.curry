@@ -6,26 +6,20 @@ module Verify.Helpers where
 
 import Data.List
 
-import Data.Time
-import FlatCurry.Files
+import Data.Time          ( ClockTime )
 import FlatCurry.Goodies
 import FlatCurry.Types
-import System.CurryPath
-import System.Directory
-import System.FilePath
+import System.CurryPath   ( lookupModuleSourceInLoadPath )
+import System.Directory   ( getModificationTime )
 
 ------------------------------------------------------------------------------
--- Definition of data directories to store generated data.
+-- Sort a list function analysis results according to their names.
+sortFunResults :: [(QName,a)] -> [(QName,a)]
+sortFunResults = sortBy (\ct1 ct2 -> fst ct1 <= fst ct2)
 
---- The name of the directory containing all data generated and used by
---- this tool.
-callTypesDataDir :: String
-callTypesDataDir = "CALLTYPES"
-
---- The name of the directory containing the computed infos for modules.
-verifyDataDir :: String
-verifyDataDir = callTypesDataDir </> "verifydata" </>
-                joinPath (tail (splitDirectories currySubdir))
+-- Shows the analysis results of functions w.r.t. a formatting operation.
+showFunResults :: (a -> String) -> [(QName,a)] -> [String]
+showFunResults showf = map (\ (qf,r) -> snd qf ++ ": " ++ showf r)
 
 ------------------------------------------------------------------------------
 --- Returns the modification time of a module.

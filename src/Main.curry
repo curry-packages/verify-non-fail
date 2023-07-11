@@ -41,13 +41,12 @@ import Verify.Files
 import Verify.Helpers
 import Verify.IOTypes
 import Verify.Options
-import Verify.SpecFiles
 
 ------------------------------------------------------------------------------
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 10/07/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 11/07/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -126,21 +125,17 @@ verifyModule astore opts mname = do
        return st
      else return vstate
   -- print statistics:
-  when (optStats opts) $
-    printStatistics vst (optVerify opts) (length fdecls) (length visfuncs)
-      (length pubcalltypes) (length ntcalltypes)
-      (length pubntiotypes) (length ntiotypes)
+  let stats = showStatistics (optVerify opts) (length fdecls) (length visfuncs)
+                             (length pubcalltypes) (length ntcalltypes)
+                             (length pubntiotypes) (length ntiotypes) (vstStats vst)
+  when (optStats opts) $ putStr stats
   let newcalltypes    = vstCallTypes vst
       newpubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
-                                             not (isTotalCallType ct))
-                               newcalltypes
+                                             not (isTotalCallType ct)) newcalltypes
   when (optVerify opts) $ do
-    storeTypes opts mname (progTypes flatprog) newpubcalltypes newcalltypes
-               iotypes
-
--- Shows the analysis results of functions w.r.t. a formatting operation.
-showFunResults :: (a -> String) -> [(QName,a)] -> [String]
-showFunResults showf = map (\ (qf,r) -> snd qf ++ ": " ++ showf r)
+    storeStatistics mname stats
+    storeTypes opts mname (allConsOfTypes (progTypes flatprog))
+               newpubcalltypes newcalltypes iotypes
 
 -- Try to verify a module (possible in several iterations).
 tryVerifyProg :: Options -> VerifyState -> String -> Map.Map QName [FuncDecl]
@@ -206,26 +201,6 @@ showIncompleteBranch qf e cs@(_:_) =
 showIncompleteBranch qf e [] =
   "Function '" ++ snd qf ++ "': the case on literals might be incomplete:\n" ++
   showExp e
-
--- Show statistics:
-printStatistics :: VerifyState -> Bool -> Int -> Int -> Int -> Int -> Int
-                -> Int -> IO ()
-printStatistics vst withverify numallfuncs numvisfuncs
-  numpubcalltypes numallcalltypes numpubiotypes numalliotypes = do
-  let (numcalls, numcases) = vstStats vst
-  putStr $ unlines $
-    [ "Functions                      (public / all): " ++
-      show numvisfuncs ++ " / " ++ show numallfuncs
-    , "Non-trivial call types         (public / all): " ++
-       show numpubcalltypes ++ " / " ++ show numallcalltypes
-    , "Non-trivial input/output types (public / all): " ++
-       show numpubiotypes ++ " / " ++ show numalliotypes ] ++
-     (if withverify
-        then [ "Non-trivial function calls checked           : " ++
-                show numcalls
-             , "Incomplete case expressions checked          : " ++
-                show numcases ]
-        else [])
 
 ------------------------------------------------------------------------------
 -- Store for the analysis information of CASS. Used to avoid multiple reads.
