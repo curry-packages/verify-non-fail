@@ -133,9 +133,9 @@ verifyModule astore opts mname = do
       newpubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
                                              not (isTotalCallType ct)) newcalltypes
   when (optVerify opts) $ do
-    storeStatistics mname stats
     storeTypes opts mname (allConsOfTypes (progTypes flatprog))
                newpubcalltypes newcalltypes iotypes
+    storeStatistics mname stats
 
 -- Try to verify a module (possible in several iterations).
 tryVerifyProg :: Options -> VerifyState -> String -> Map.Map QName [FuncDecl]
@@ -152,7 +152,7 @@ tryVerifyProg opts vstate mname funusage fdecls = do
       if null pubcalltypes
         then putStrLn "!"
         else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL PUBLIC CALL TYPES:"
-               : showFunResults prettyFunCallTypes pubcalltypes
+               : showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
     else unless (null newfailures || optVerb opts < 2) $ printFailures st
   unless (null newfailures) $ printWhenStatus opts $ unlines $
     "Operations with refined call types (used in future analyses):" :
