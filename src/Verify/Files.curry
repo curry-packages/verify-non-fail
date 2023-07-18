@@ -26,6 +26,7 @@ import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
                             , modNameToPath )
 import System.Directory
 import System.FilePath      ( (</>), dropFileName, joinPath, splitDirectories )
+import System.IOExts        ( readCompleteFile )
 
 import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
@@ -314,7 +315,7 @@ writeCallTypeSpecMod opts mname pubntcalltypes = do
   if null pubntcalltypes
     then when exct $ removeFile ctfile
     else do
-      oldctmod <- if exct then readFile ctfile else return ""
+      oldctmod <- if exct then readCompleteFile ctfile else return ""
       let ctmod = showCProg (callTypes2SpecMod mname pubntcalltypes) ++ "\n"
       unless (oldctmod == ctmod) $ do
         writeFile ctfile ctmod

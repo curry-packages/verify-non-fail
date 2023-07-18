@@ -90,7 +90,7 @@ verifyModule astore opts mname = do
                        showFunResults prettyFunCallTypes calltypes
     else when (optVerb opts > 1 || optCallTypes opts) $
       putStrLn $ unlines $ "NON-TRIVIAL CALL TYPES OF PUBLIC OPERATIONS:" :
-        showFunResults prettyFunCallTypes pubcalltypes
+        showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
   rvinfo <- loadAnalysisWithImports astore resultValueAnalysis opts flatprog
   let iotypes      = map (inOutATypeFunc (cass2AType rvinfo)) fdecls
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
@@ -101,7 +101,7 @@ verifyModule astore opts mname = do
     else when (optVerb opts > 1 || optIOTypes opts) $
       putStrLn $ unlines $
         "NON-TRIVIAL INPUT/OUTPUT TYPES OF PUBLIC OPERATIONS:" :
-        showFunResults showIOT pubntiotypes
+        showFunResults showIOT (sortFunResults pubntiotypes)
   let vstate = initVerifyState fdecls allconsar impcalltypes calltypes
                                (iotypes ++ impiotypes) opts
       funusage = funcDecls2Usage mname (progFuncs flatprog)
@@ -149,8 +149,8 @@ tryVerifyProg opts vstate mname funusage fdecls = do
       let pubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
                                               not (isTotalCallType ct))
                                 (vstCallTypes st)
-      if null pubcalltypes
-        then putStrLn "!"
+      if null pubcalltypes || optVerb opts == 0
+        then putStrLn "\n"
         else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL PUBLIC CALL TYPES:"
                : showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
     else unless (null newfailures || optVerb opts < 2) $ printFailures st

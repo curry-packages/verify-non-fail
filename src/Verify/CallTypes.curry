@@ -193,7 +193,9 @@ callTypeFunc opts allcons (Func qf ar _ _ rule) = case rule of
 --- Computes the call type of an external (primitive) function.
 --- Currently, we assume that they are total functions.
 callTypeExternalFunc :: QName -> Int -> (QName,[[CallType]])
-callTypeExternalFunc qf ar = (qf, [take ar (repeat AnyT)])
+callTypeExternalFunc qf ar
+  | qf == pre "failed" = (qf, [])
+  | otherwise          = (qf, [take ar (repeat AnyT)])
 
 -- Add new variables not occurring in the left-hand side:
 addFreshVars :: [Int] -> CallTypeState -> CallTypeState
