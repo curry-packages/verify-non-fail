@@ -46,7 +46,7 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 11/07/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 19/07/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -58,7 +58,7 @@ main = do
     ms -> do astore <- newIORef (AnaStore [])
              mapM_ (runModuleAction (verifyModule astore opts)) ms
 
---- Verify a single module.  
+--- Verify a single module.
 verifyModule :: IORef (AnalysisStore AType) -> Options -> String -> IO ()
 verifyModule astore opts mname = do
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
@@ -126,12 +126,13 @@ verifyModule astore opts mname = do
      else return vstate
   -- print statistics:
   let stats = showStatistics (optVerify opts) (length fdecls) (length visfuncs)
-                             (length pubcalltypes) (length ntcalltypes)
-                             (length pubntiotypes) (length ntiotypes) (vstStats vst)
+                (length pubcalltypes) (length ntcalltypes)
+                (length pubntiotypes) (length ntiotypes) (vstStats vst)
   when (optStats opts) $ putStr stats
   let newcalltypes    = vstCallTypes vst
       newpubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
-                                             not (isTotalCallType ct)) newcalltypes
+                                             not (isTotalCallType ct))
+                               newcalltypes
   when (optVerify opts) $ do
     storeTypes opts mname (allConsOfTypes (progTypes flatprog))
                newpubcalltypes newcalltypes iotypes
@@ -253,7 +254,7 @@ data VerifyState = VerifyState
   , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
-  , vstVarTypes    :: [(Int,InOutType,[Int])] -- relate variable to types
+  , vstVarTypes    :: [VarType]         -- relate variable to types
   , vstImpCallTypes:: [(QName,[[CallType]])] -- call types of imports
   , vstCallTypes   :: [(QName,[[CallType]])] -- call types of module
   , vstFuncTypes   :: [(QName,InOutType)]   -- the in/out type for each function
@@ -264,13 +265,7 @@ data VerifyState = VerifyState
   , vstToolOpts :: Options
   }
 
-showVarTypes :: [(Int, InOutType, [Int])] -> String
-showVarTypes = unlines . map showVarType
-
-showVarType :: (Int, InOutType, [Int]) -> String
-showVarType (rv, iot, argvs) =
-  show rv ++ ": " ++ showIOT iot ++ " " ++ show argvs
-
+--- Initializes the verification state.
 initVerifyState :: [FuncDecl] -> [[(QName,Int)]] -> [(QName,[[CallType]])]
                 -> [(QName,[[CallType]])] -> [(QName,InOutType)] -> Options
                 -> VerifyState
@@ -366,23 +361,22 @@ addVarExps varexps = do
   st <- get
   put $ st { vstVarExp = vstVarExp st ++ varexps }
 
--- Set the expressions for variables.
-getVarTypes :: VerifyStateM [(Int,InOutType,[Int])]
+-- Get all currently stored variable types.
+getVarTypes :: VerifyStateM [VarType]
 getVarTypes = do
   st <- get
   return $ vstVarTypes st
 
--- Set the expressions for variables.
-setVarTypes :: [(Int,InOutType,[Int])] -> VerifyStateM ()
+-- Sets all variable types.
+setVarTypes :: [VarType] -> VerifyStateM ()
 setVarTypes vartypes = do
   st <- get
   put $ st { vstVarTypes = vartypes }
 
--- Adds new variable types.
-addVarType :: (Int,InOutType,[Int]) -> VerifyStateM ()
+-- Adds a new variable type to the current set of variable types.
+addVarType :: VarType -> VerifyStateM ()
 addVarType vartype = do
   st <- get
-  --lift $ putStrLn $ "addVarType: " ++ showVarType vartype
   put $ st { vstVarTypes = vstVarTypes st ++ [vartype] }
 
 -- Gets the call type for a given operation.

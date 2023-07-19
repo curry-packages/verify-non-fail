@@ -40,12 +40,12 @@ isFailCallType = null
 
 -- Shows a call type in a prettier way.
 prettyCT :: CallType -> String
-prettyCT AnyT = "any"
+prettyCT AnyT       = "_"
 prettyCT (MCons cs) = "{" ++ intercalate " | " (map prettyC cs) ++ "}"
  where
-  prettyC (qc,args) = snd qc ++ prettyArgs args
+  prettyC (qc,args)      = snd qc ++ prettyArgs args
   prettyArgs []          = ""
-  prettyArgs args@(_:_) = "(" ++ intercalate ", " (map prettyCT args) ++ ")"
+  prettyArgs args@(_:_) = "(" ++ intercalate "," (map prettyCT args) ++ ")"
 
 prettyFunCallTypes :: [[CallType]] -> String
 prettyFunCallTypes = intercalate " | " . map prettyCallTypeArgs
@@ -54,7 +54,7 @@ prettyCallTypeArgs :: [CallType] -> String
 prettyCallTypeArgs cts = case cts of
   []   -> "()"
   [ct] -> prettyCT ct
-  _    -> "(" ++ intercalate ", " (map prettyCT cts) ++ ")"
+  _    -> "(" ++ intercalate "," (map prettyCT cts) ++ ")"
 
 
 --- Simplify call types by recursively transforming each complete

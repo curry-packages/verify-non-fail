@@ -317,7 +317,7 @@ writeCallTypeSpecMod opts mname pubntcalltypes = do
     else do
       oldctmod <- if exct then readCompleteFile ctfile else return ""
       let ctmod = showCProg (callTypes2SpecMod mname pubntcalltypes) ++ "\n"
-      unless (oldctmod == ctmod) $ do
+      unless (oldctmod == ctmod || not (optWrite opts)) $ do
         writeFile ctfile ctmod
         includepath <- fmap (</> "include") getPackagePath
         printWhenStatus opts $

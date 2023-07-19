@@ -30,10 +30,12 @@ data Options = Options
   , optError     :: Bool  -- consider Prelude.error as failing operation?
   , optStats     :: Bool  -- show statitics?
   , optTime      :: Bool  -- show elapsed verification time?
+  , optWrite     :: Bool  -- write a `CALLTYPES` module for later use?
   }
 
+--- The default options of the verification tool.
 defaultOptions :: Options
-defaultOptions = Options 1 False False False False True False False False
+defaultOptions = Options 1 False False False False True False False False False
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -86,6 +88,9 @@ options =
   , Option "t" ["time"]
            (NoArg (\opts -> opts { optTime = True }))
            "show total verification time for each module"
+  , Option "w" ["write"]
+           (NoArg (\opts -> opts { optWrite = True }))
+           "write  a '..._CALLTYPES' module with required\ncall types"
   ]
  where
   safeReadNat opttrans s opts = case readNat s of

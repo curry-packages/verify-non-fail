@@ -3,13 +3,17 @@
 --- and manipulate such types.
 ---
 --- @author Michael Hanus
---- @version June 2023
+--- @version July 2023
 ------------------------------------------------------------------------------
 
-module Verify.IOTypes where
+module Verify.IOTypes
+  ( InOutType(..), isAnyIOType, showIOT, inOutATypeFunc
+  , VarType, showVarTypes, simplifyVarTypes, bindVarInIOTypes
+  )
+ where
 
 import Data.List
-
+import Data.Maybe      ( mapMaybe )
 import Analysis.Values
 import FlatCurry.Types
 
@@ -38,7 +42,7 @@ isAnyIOType (IOT iots) = case iots of
 showIOT :: InOutType -> String
 showIOT (IOT iots) = "{" ++ intercalate " || " (map showIOType iots) ++ "}"
  where
-  showIOType (ict,oct) = "(" ++ intercalate ", " (map showAType ict) ++ ")" ++
+  showIOType (ict,oct) = "(" ++ intercalate "," (map showAType ict) ++ ")" ++
                          " |-> " ++ showAType oct
 
 --- Normalize InOutTypes by joining results of IOTypes with identical arguments.
@@ -135,17 +139,34 @@ inOutATypeExpr tst exp = case exp of
 
 
 ------------------------------------------------------------------------------
--- Rules to simplify input/output types for variables.
+-- Handling input/output variable types.
 
-simplifyVarTypes :: [(Int,InOutType,[Int])] -> [(Int,InOutType,[Int])]
+--- An input/output variable type `(v,iot,vs)` consists of
+--- * a variable `v`
+--- * an input/output type `iot` specifying the result of `v`, i.e.,
+---   either the input/output type of the function bound to `v` or
+---   simply `{() |-> any}` if the variable is unbound
+--- * the list `vs` of arguments of the function to which `v` is bound
+---   (which could be empty).
+type VarType = (Int,InOutType,[Int])
+
+--- Shows a list of input/output variables types.
+showVarTypes :: [VarType] -> String
+showVarTypes = unlines . map showVarType
+ where
+  showVarType (rv, iot, argvs) =
+    show rv ++ ": " ++ showIOT iot ++ " " ++ show argvs
+
+--- Simplify a set of input/output variable types.
+simplifyVarTypes :: [VarType] -> [VarType]
 simplifyVarTypes = simpDefVarTypes []
  where
   simpDefVarTypes defts vartypes =
-    let defvartypes = (concatMap isDefinitiveType vartypes) \\ defts
-    in if null defvartypes
+    let defvartypes = (concatMap definitiveVarTypesFrom vartypes) \\ defts
+    in if null defvartypes -- no more definitive types available?
          then simpEmptyVarTypes [] vartypes
          else simpDefVarTypes (defts ++ defvartypes)
-                              (intersectVarTypes vartypes defvartypes)
+                              (propagateDefTypes defvartypes vartypes)
 
   simpEmptyVarTypes evs vartypes =
     if null emptyvars
@@ -153,37 +174,52 @@ simplifyVarTypes = simpDefVarTypes []
       else simpEmptyVarTypes (emptyvars ++ evs)
                              (map propagateEmptyVars vartypes)
    where
-    emptyvars = concatMap getEmptyVar vartypes \\ evs
+    -- variables with an empty domain:
+    emptyvars = mapMaybe getEmptyVar vartypes \\ evs
+     where getEmptyVar iot = case iot of (v, IOT [], _) -> Just v
+                                         _              -> Nothing
 
     propagateEmptyVars (v, IOT iots, vs) =
       if any (`elem` emptyvars) vs then (v, IOT [], vs)
                                    else (v, IOT iots, vs)
-  
-    getEmptyVar iot = case iot of (v, IOT [], _) -> [v]
-                                  _              -> []
 
-  isDefinitiveType iot = case iot of
-    (_, IOT [(ats,_)], vs) -> zip vs ats
-    _                       -> []
+  -- Extracts the definitive types (arguments/results) from a given var type.
+  definitiveVarTypesFrom :: VarType -> [(Int,AType)]
+  definitiveVarTypesFrom iot = case iot of
+    (v, IOT [([],rt)], []) | rt /= anyType -> [(v,rt)]
+    (_, IOT [(ats,_)], vs)                 -> zip vs ats
+    _                                      -> []
 
-  intersectVarTypes viots []           = viots
-  intersectVarTypes viots ((v,vt):vts) =
-    intersectVarTypes (intersectResultType viots (v,vt)) vts
+  -- propagate definite variable types into a set of in/out variable types:
+  propagateDefTypes :: [(Int,AType)] -> [VarType] -> [VarType]
+  propagateDefTypes []           viots = viots
+  propagateDefTypes ((v,vt):vts) viots =
+    propagateDefTypes vts (map (propagateDefType (v,vt)) viots)
 
-  intersectResultType :: [(Int,InOutType,[Int])] -> (Int,AType)
-                      -> [(Int,InOutType,[Int])]
-  intersectResultType viots (v,vt) = map interSect viots
-   where
-    interSect (v1, IOT iots, vs1) =
-      if v /= v1 then (v1, IOT iots, vs1)
-                 else (v1, IOT (filter ((/= emptyType) . snd)
-                                       (map interResult iots)), vs1)
-     where interResult (at,rt) = (at, joinAType rt vt)
+  -- propagate a definite variable type into an in/out variable type
+  -- by either refining the result types or argument types:
+  propagateDefType :: (Int,AType) -> VarType -> VarType
+  propagateDefType (v,vt) (v1, IOT iots, vs1)
+    | v == v1 -- propagate the definite result into the input/output type:
+    = ( v1
+      , IOT (filter ((/= emptyType) . snd)
+                    (map (\ (at,rt) -> (at, joinAType rt vt)) iots))
+      , vs1)
+    | v `elem` vs1 -- propagate a definitive argument into the in/out type:
+    = ( v1         -- delete incompatible argument types:
+      , maybe (IOT iots) -- should not occur
+              (\i -> IOT (filter (all (/= emptyType) . fst)
+                            (map (\ (at,rt) ->
+                                   (replace (joinAType (at!!i) vt) i at, rt))
+                                 iots)))
+              (elemIndex v vs1)
+      , vs1)
+    | otherwise
+    = (v1, IOT iots, vs1)
 
 --- Adds the binding of a variable to a constructor to the set of
 --- input/output types for variables.
-bindVarInIOTypes :: Int -> QName -> [(Int,InOutType,[Int])]
-                 -> [(Int,InOutType,[Int])]
+bindVarInIOTypes :: Int -> QName -> [VarType] -> [VarType]
 bindVarInIOTypes var qc = map bindVar
  where
   bindVar (v, IOT iots, vs)
