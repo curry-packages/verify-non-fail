@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version July 2023
+--- @version August 2023
 -------------------------------------------------------------------------
 
 module Main where
@@ -28,6 +28,7 @@ import qualified Data.Map as Map
 import Debug.Profile
 import FlatCurry.Files
 import FlatCurry.Goodies
+import FlatCurry.NormalizeLet
 import qualified FlatCurry.Pretty as FCP
 import FlatCurry.Types
 import System.CurryPath           ( runModuleAction )
@@ -46,7 +47,7 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 19/07/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 14/08/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -110,38 +111,42 @@ verifyModule astore opts mname = do
     map (\ (qf, qfs) -> snd qf ++ ": used in " ++
                         unwords (map (snd . funcName) qfs))
         (Map.toList funusage)
-  vst <-
+  (vnumits, vtime, vst) <-
    if optVerify opts
      then do
        printWhenStatus opts $ "Start verification of '" ++ mname ++ "' (" ++
          show (length fdecls) ++ " functions):"
        pi1 <- getProcessInfos
-       st <- tryVerifyProg opts vstate mname funusage fdecls
+       (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
          "TOTAL VERIFICATION TIME: " ++ show tdiff ++ " msec"
-       return st
-     else return vstate
+       return (numits, tdiff, st)
+     else return (0, 0, vstate)
   -- print statistics:
-  let stats = showStatistics (optVerify opts) (length fdecls) (length visfuncs)
-                (length pubcalltypes) (length ntcalltypes)
-                (length pubntiotypes) (length ntiotypes) (vstStats vst)
-  when (optStats opts) $ putStr stats
-  let newcalltypes    = vstCallTypes vst
-      newpubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
-                                             not (isTotalCallType ct))
-                               newcalltypes
+  let newcalltypes      = vstCallTypes vst
+      newntcalltypes    = filter (not . isTotalCallType . snd) newcalltypes
+      newpubntcalltypes = filter ((`elem` visfuncs) . fst) newntcalltypes
+  let (stattxt,statcsv) = showStatistics vtime vnumits (optVerify opts)
+                            (length fdecls) (length visfuncs)
+                            (length pubntiotypes) (length ntiotypes)
+                            (length pubcalltypes) (length ntcalltypes)
+                            (length newpubntcalltypes) (length newntcalltypes)
+                            (vstStats vst)
+  when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
     storeTypes opts mname (allConsOfTypes (progTypes flatprog))
-               newpubcalltypes newcalltypes iotypes
-    storeStatistics mname stats
+               newpubntcalltypes newcalltypes iotypes
+    storeStatistics mname stattxt statcsv
 
--- Try to verify a module (possible in several iterations).
-tryVerifyProg :: Options -> VerifyState -> String -> Map.Map QName [FuncDecl]
-              -> [FuncDecl] -> IO VerifyState
-tryVerifyProg opts vstate mname funusage fdecls = do
+-- Try to verify a module, possibly in several iterations.
+-- The second argument is the number of already performed iterations,
+-- the first component of the result is the total number of iterations.
+tryVerifyProg :: Options -> Int -> VerifyState -> String
+              -> Map.Map QName [FuncDecl] -> [FuncDecl] -> IO (Int,VerifyState)
+tryVerifyProg opts numits vstate mname funusage fdecls = do
   st <- execStateT (mapM_ verifyFunc fdecls) vstate
   let newfailures = vstNewFailed st
   if null (vstFailedFuncs st) && null (vstPartialBranches st)
@@ -163,7 +168,7 @@ tryVerifyProg opts vstate mname funusage fdecls = do
                , vstNewFailed = [] }
   if null newfailures
     then do printFailures st'
-            return st'
+            return (numits + 1, st')
     else do
       let -- functions with refined call types:
           rfuns = map fst (filter (not . isFailCallType . snd) newfailures)
@@ -174,7 +179,7 @@ tryVerifyProg opts vstate mname funusage fdecls = do
                    newfailures)
       printWhenStatus opts $ "Repeat verification with new call types..." ++
         "(" ++ show (length newfdecls) ++ " functions)"
-      tryVerifyProg opts st' mname funusage newfdecls
+      tryVerifyProg opts (numits + 1) st' mname funusage newfdecls
  where
   visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
 
@@ -254,7 +259,7 @@ data VerifyState = VerifyState
   , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
-  , vstVarTypes    :: [VarType]         -- relate variable to types
+  , vstVarTypes    :: [VarType]         -- map variable to its abstract types
   , vstImpCallTypes:: [(QName,[[CallType]])] -- call types of imports
   , vstCallTypes   :: [(QName,[[CallType]])] -- call types of module
   , vstFuncTypes   :: [(QName,InOutType)]   -- the in/out type for each function
@@ -367,6 +372,12 @@ getVarTypes = do
   st <- get
   return $ vstVarTypes st
 
+-- Gets the currently stored types for a given variable.
+getVarTypesOf :: Int -> VerifyStateM [VarType]
+getVarTypesOf v = do
+  st <- get
+  return $ filter ((==v) . fst3) (vstVarTypes st)
+
 -- Sets all variable types.
 setVarTypes :: [VarType] -> VerifyStateM ()
 setVarTypes vartypes = do
@@ -374,10 +385,16 @@ setVarTypes vartypes = do
   put $ st { vstVarTypes = vartypes }
 
 -- Adds a new variable type to the current set of variable types.
+-- It could be an alternative type for an already existent variable or
+-- a type for a new variable.
 addVarType :: VarType -> VerifyStateM ()
 addVarType vartype = do
   st <- get
   put $ st { vstVarTypes = vstVarTypes st ++ [vartype] }
+
+-- Adds a new variable `Any` type to the current set of variable types.
+addVarAnyType :: Int -> VerifyStateM ()
+addVarAnyType v = addVarType (v, IOT [([], anyType)], [])
 
 -- Gets the call type for a given operation.
 getCallType :: QName -> Int -> VerifyStateM [[CallType]]
@@ -431,7 +448,7 @@ printIfVerb v s = do
 verifyFunc :: FuncDecl -> VerifyStateM ()
 verifyFunc (Func qf ar _ _ rule) = case rule of
   Rule vs exp -> do setCurrentFunc qf ar vs
-                    verifyFuncRule vs exp
+                    verifyFuncRule vs (normalizeLet exp)
   External _  -> return ()
 
 verifyFuncRule :: [Int] -> Expr -> VerifyStateM ()
@@ -464,7 +481,8 @@ showVarExpTypes = do
                     ":\nVariable bindings:\n" ++
       unlines (map (\ (v,e) -> show v ++ " |-> " ++ showExp e)
                          (vstVarExp st))
-    lift $ putStr $ "Variable types\n" ++ showVarTypes (vstVarTypes st)
+    vartypes <- getVarTypes
+    lift $ putStr $ "Variable types\n" ++ showVarTypes vartypes
 
 showExp :: Expr -> String
 showExp e =
@@ -482,14 +500,19 @@ verifyExpr exp = case exp of
               mapM addVarType iots
               return v
 
--- Current problem: variable ve is bound to the result of exp,
--- but this is not correct for or/cases!
--- Solution? return result of exp?
-
 -- Verify an expression identified by variable (first argument)
-verifyVarExpr :: Int -> Expr -> VerifyStateM [(Int, InOutType, [Int])]
+verifyVarExpr :: Int -> Expr -> VerifyStateM [VarType]
 verifyVarExpr ve exp = case exp of
-  Var _         -> return []
+  Var v         -> if v == ve
+                     then return []
+                     else do
+                       --lift $ putStrLn $ "Expression with different vars: " ++
+                       --                  show (v,ve)
+                       --showVarExpTypes
+                       vtypes <- getVarTypesOf v
+                       -- TODO: improve by handling equality constraint v==ve
+                       -- instead of copying the current types for v to ve:
+                       return $ map (\ (_,iots,vs) -> (ve,iots,vs)) vtypes
   Lit l         -> return [(ve, IOT [([], aCons (lit2cons l))], [])]
   Comb ct qf es -> do
     vs <- mapM verifyExpr es
@@ -508,10 +531,15 @@ verifyVarExpr ve exp = case exp of
       _        -> -- note: also partial calls are considered as constr.
                   do return [consIOType qf vs ve]
   Let bs e      -> do addVarExps bs
+                      vts <- getVarTypes
+                      mapM_ (addVarAnyType . fst) bs
                       iotss <- mapM (\ (v,be) -> verifyVarExpr v be) bs
-                      mapM addVarType (concat iotss)
+                      setVarTypes vts -- set to old var types with v/anyType
+                      mapM_ addVarType (concat iotss)
+                      mapM_ (addAnyTypeIfUnknown . fst) bs
                       verifyVarExpr ve e
   Free vs e     -> do addVarExps (map (\v -> (v, Var v)) vs)
+                      mapM_ addVarAnyType vs
                       verifyVarExpr ve e
   Or e1 e2      -> do iots1 <- verifyVarExpr ve e1 -- 
                       iots2 <- verifyVarExpr ve e2
@@ -522,6 +550,11 @@ verifyVarExpr ve exp = case exp of
                       return (concat iotss)
   Typed e _     -> verifyVarExpr ve e -- TODO: use type info
  where
+  -- adds Any type for a variable if it is unknown
+  addAnyTypeIfUnknown v = do
+    vts <- getVarTypesOf v
+    when (null vts) (addVarAnyType v)
+
   -- create input/output type for a constructor (improve by type info?)
   consIOType qc vs rv =
     (rv, IOT [(take (length vs) (repeat anyType), aCons qc)], vs)
@@ -619,17 +652,27 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   if getVarType casevar branchvartypes == emptyType
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
-            mapM_ (\v -> addVarType (v, IOT [([], anyType)], [])) vs
+            mapM_ addVarAnyType vs
             iots <- verifyVarExpr ve e
             setVarTypes vts
             return iots
 
 -- Gets the abstract type of a variable w.r.t. a set of variable types.
-getVarType :: Int -> [(Int, InOutType, [Int])] -> AType
+getVarType :: Int -> [VarType] -> AType
 getVarType v viots =
+  let vts = filter (\ (rv, _, _) -> rv == v) viots
+  in if null vts
+       then error $ "Type of variable " ++ show v ++ " not found!"
+       else let rts = concatMap (\ (_, IOT iots, _) -> map snd iots) vts 
+            in if null rts then emptyType
+                           else foldr1 lubAType rts
+
+-- Old version:
+getVarType' :: Int -> [VarType] -> AType
+getVarType' v viots =
   let rts = map (\ (rv, IOT iots, _) -> if rv == v then map snd iots
                                                    else [])
-                     viots
+                viots
   in if null rts
        then error $ "Type of variable " ++ show v ++ " not found!"
        else if null (concat rts)
@@ -673,5 +716,11 @@ usedFuncsInExpr e =
   fr _ exp = exp
   cas _ exp bs = exp . foldr (.) id bs
   branch _ exp = exp
+
+------------------------------------------------------------------------------
+-- Utilities
+
+fst3 :: (a,b,c) -> a
+fst3 (x,_,_) = x
 
 ------------------------------------------------------------------------------

@@ -71,6 +71,14 @@ addNewAVars vs iost =
   iost { varPosAType = zip vs (map (\_ -> (freshVarPos,anyType)) vs) ++
                        varPosAType iost }
 
+-- Sets the type of a variable (which already exists!).
+setVarType :: Int -> AType -> InOutTypeState -> InOutTypeState
+setVarType vi vt iost =
+  iost { varPosAType = 
+           map (\ (v,(p,t)) -> if v==vi then (v,(p,vt)) else (v,(p,t)))
+               (varPosAType iost) }
+
+--- The initial state assumes that all arguments have type `Any`.
 initInOutTypeState :: QName -> [Int] -> (QName -> AType) -> InOutTypeState
 initInOutTypeState qf vs resval =
   InOutTypeState qf (zip vs (map (\i -> ([i],anyType)) [0..]))
@@ -120,12 +128,14 @@ inOutATypeExpr tst exp = case exp of
     | isFreshVarPos vpos
     = addNewAVars (patternArgs pat) tst -- fresh var, do not change call type
     | otherwise
-    = case pat of
-        Pattern qc vs -> addNewAVars vs $
-                           tst { ccAType = setACons2CT qc vpos (ccAType tst) }
-        LPattern l    -> tst { ccAType = setACons2CT (lit2cons l) vpos
-                                                     (ccAType tst) }
-   where vpos = maybe (varNotFound v) fst (lookup v (varPosAType tst))
+    = case pat of Pattern _ vs -> addNewAVars vs tst'
+                  LPattern _   -> tst'
+   where
+    consOfPat = case pat of Pattern qc _ -> qc
+                            LPattern l   -> lit2cons l
+    tst' = (setVarType v (aCons consOfPat) tst)
+             { ccAType = setACons2CT consOfPat vpos (ccAType tst) }
+    vpos = maybe (varNotFound v) fst (lookup v (varPosAType tst))
 
   addBranchPattern (Pattern _ vs) = addNewAVars vs tst
   addBranchPattern (LPattern _)   = tst

@@ -181,7 +181,7 @@ initCallTypeState opts qf vs =
                 (take (length vs) (repeat AnyT)) opts
 
 --- Computes the call type of a function where all constructors are
---- provided as the first argument.
+--- provided as the second argument.
 callTypeFunc :: Options -> [[QName]] -> FuncDecl -> (QName,[[CallType]])
 callTypeFunc opts allcons (Func qf ar _ _ rule) = case rule of
   External _  -> callTypeExternalFunc qf ar
@@ -255,7 +255,8 @@ callType2AType :: CallType -> AType
 callType2AType AnyT       = Any
 callType2AType (MCons qs) = ACons (nub (map fst qs))
 
---- Transforms a call type into an abstract type.
+--- Transforms an abstract type into a call type.
+--- The first argument contains the arities of all constructors.
 aType2CallType :: [[(QName,Int)]] -> AType -> CallType
 aType2CallType _       Any        = AnyT
 aType2CallType allcons (ACons qs) =

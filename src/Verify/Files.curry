@@ -27,6 +27,7 @@ import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
 import System.Directory
 import System.FilePath      ( (</>), dropFileName, joinPath, splitDirectories )
 import System.IOExts        ( readCompleteFile )
+import Text.CSV
 
 import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
@@ -69,28 +70,42 @@ callTypesModule :: String -> String
 callTypesModule mname = mname ++ "_CALLTYPES"
 
 ------------------------------------------------------------------------------
--- Show statistics:
-showStatistics :: Bool -> Int -> Int -> Int -> Int -> Int
-               -> Int -> (Int,Int) -> String
-showStatistics withverify numallfuncs numvisfuncs numpubcalltypes
-               numallcalltypes numpubiotypes numalliotypes
-               (numcalls, numcases) = unlines $
-  [ "Functions                      (public / all): " ++
-    show numvisfuncs ++ " / " ++ show numallfuncs
-  , "Non-trivial call types         (public / all): " ++
-     show numpubcalltypes ++ " / " ++ show numallcalltypes
-  , "Non-trivial input/output types (public / all): " ++
-     show numpubiotypes ++ " / " ++ show numalliotypes ] ++
-   (if withverify
-      then [ "Non-trivial function calls checked           : " ++
-              show numcalls
-           , "Incomplete case expressions checked          : " ++
-              show numcases ]
-      else [])
+-- Show statistics in textual and in CSV format:
+showStatistics :: Int -> Int -> Bool -> Int -> Int -> Int -> Int -> Int
+               -> Int -> Int -> Int -> (Int,Int) -> (String, [String])
+showStatistics vtime numits withverify numallfuncs numvisfuncs
+               numpubiotypes numalliotypes numpubcalltypes numallcalltypes
+               numnewpubcalltypes numnewcalltypes (numcalls, numcases) =
+  ( unlines $
+      [ "Functions                      (public / all): " ++
+        show numvisfuncs ++ " / " ++ show numallfuncs
+      , "Non-trivial input/output types (public / all): " ++
+        show numpubiotypes ++ " / " ++ show numalliotypes
+      , "Initial non-trivial call types (public / all): " ++
+        show numpubcalltypes ++ " / " ++ show numallcalltypes ] ++
+      (if withverify
+          then [ "Final non-trivial call types   (public / all): " ++
+                 show numnewpubcalltypes ++ " / " ++ show numnewcalltypes
+               , "Non-trivial function calls checked           : " ++
+                   show numcalls
+               , "Incomplete case expressions checked          : " ++
+                   show numcases
+               , "Number of iterations for call-type inference : " ++
+                 show numits
+               , "Total verification in msecs                  : " ++
+                 show vtime ]
+          else [])
+  , map show [ numvisfuncs, numallfuncs, numpubiotypes, numalliotypes
+             , numpubcalltypes, numallcalltypes
+             , numnewpubcalltypes, numnewcalltypes
+             , numcalls, numcases, numits, vtime ]
+  )
 
---- Store the statitics for a module in a file.
-storeStatistics :: String -> String -> IO ()
-storeStatistics mname = writeFile (statsFile mname)
+--- Store the statitics for a module in a text and a CSV file.
+storeStatistics :: String -> String -> [String] -> IO ()
+storeStatistics mname stattxt statcsv = do
+  writeFile (statsFile mname) stattxt
+  writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
 
 ------------------------------------------------------------------------------
 -- Stores non-trivial call types and non-trivial input/output types.
