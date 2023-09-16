@@ -49,13 +49,16 @@ prettyCT (MCons cs) = "{" ++ intercalate " | " (map prettyC cs) ++ "}"
   prettyArgs args@(_:_) = "(" ++ intercalate "," (map prettyCT args) ++ ")"
 
 prettyFunCallTypes :: [[CallType]] -> String
-prettyFunCallTypes = intercalate " | " . map prettyCallTypeArgs
+prettyFunCallTypes cts =
+  if isFailCallType cts
+    then "<FAILING>"
+    else intercalate " | " $ map prettyCallTypeArgs cts
 
 prettyCallTypeArgs :: [CallType] -> String
 prettyCallTypeArgs cts = case cts of
   []   -> "()"
   [ct] -> prettyCT ct
-  _    -> "(" ++ intercalate "," (map prettyCT cts) ++ ")"
+  _    -> "(" ++ intercalate ", " (map prettyCT cts) ++ ")"
 
 
 --- Simplify call types by recursively transforming each complete
