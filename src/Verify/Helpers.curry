@@ -4,6 +4,7 @@
 
 module Verify.Helpers where
 
+import Data.Char          ( isDigit )
 import Data.List
 
 import Data.Time          ( ClockTime )
@@ -109,8 +110,8 @@ arityOfCons allcons qc@(mn,cn)
           id
           (lookup qc (concat allcons))
 
--- Some predefined data constructors grouped by their types.
--- Used for testing in module CallTypes.
+--- Some predefined data constructors grouped by their types.
+--- Used for testing in module CallTypes.
 stdConstructors :: [[QName]]
 stdConstructors =
   [ [pre "False", pre "True"]
@@ -121,5 +122,17 @@ stdConstructors =
   , [pre "IOError", pre "UserError", pre "FailError", pre "NondetError"]
   ] ++
   map (\n -> [pre $ "(" ++ take n (repeat ',') ++ ")"]) [0 .. 8]
+
+--- Is this the name of a non-failing encapsulated search operation?
+isEncSearchOp :: QName -> Bool
+isEncSearchOp qf =
+  qf `elem` map (\n -> ("Control.AllValues",n))
+                ["allValues", "oneValue", "isFail"]
+
+--- Is this the name of a set function?
+isSetFunOp :: QName -> Bool
+isSetFunOp (mn,fn) =
+  mn == "Control.SetFunctions" && take 3 fn == "set" &&
+  all isDigit (drop 3 fn)
 
 ------------------------------------------------------------------------------

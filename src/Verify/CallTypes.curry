@@ -2,14 +2,15 @@
 --- The definition of call types and an operation to infer them.
 ---
 --- @author Michael Hanus
---- @version June 2023
+--- @version September 2023
 ------------------------------------------------------------------------------
 
 module Verify.CallTypes where
 
 import Data.List
 
-import Analysis.Values
+import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons
+                       , joinAType, lubAType, caseAType )
 import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Types
@@ -252,15 +253,17 @@ callTypeExpr ctst exp = case exp of
 
 --- Transforms a call type into an abstract type.
 callType2AType :: CallType -> AType
-callType2AType AnyT       = Any
-callType2AType (MCons qs) = ACons (nub (map fst qs))
+callType2AType AnyT       = anyType
+callType2AType (MCons qs) = foldr lubAType emptyType
+                                  (map aCons (nub (map fst qs)))
 
 --- Transforms an abstract type into a call type.
 --- The first argument contains the arities of all constructors.
 aType2CallType :: [[(QName,Int)]] -> AType -> CallType
-aType2CallType _       Any        = AnyT
-aType2CallType allcons (ACons qs) =
-  MCons (map (\qc -> (qc, take (arityOfCons allcons qc) (repeat AnyT))) qs)
+aType2CallType allcons =
+  caseAType (MCons . map (\qc ->
+                            (qc, take (arityOfCons allcons qc) (repeat AnyT))))
+            AnyT
 
 ------------------------------------------------------------------------------
 
@@ -271,11 +274,13 @@ subtypeOfSomeAT ct cts = any (subtypesAT ct) cts
 
 -- Subtype relation between an abstract type and a call type.
 subtypeAT :: AType -> CallType -> Bool
-subtypeAT _          AnyT       = True
-subtypeAT Any        (MCons _ ) = False
-subtypeAT (ACons m1) (MCons m2) =
-  all (\ (_,ats) -> all (==AnyT) ats) m2 -- no further argument restrictions
-  && all (`elem` map fst m2) m1
+subtypeAT _     AnyT        = True
+subtypeAT atype (MCons cts) =
+  caseAType
+    (\qs -> all (\ (_,ats) -> all (==AnyT) ats) cts -- no argument restrictions
+            && all (`elem` map fst cts) qs)
+    False
+    atype
 
 ------------------------------------------------------------------------------
 
@@ -305,13 +310,18 @@ makeSubtypeOfSomeAT ats (argct:argcts) =
 
 -- Subtype relation between an abstract type and a call type.
 makeSubtypeOfCT :: (Int,AType) -> CallType -> Maybe [(Int,AType)]
-makeSubtypeOfCT _          AnyT         = Just []
-makeSubtypeOfCT (v,Any)    ct@(MCons _) = Just [(v, callType2AType ct)]
-makeSubtypeOfCT (_,ACons m1) (MCons m2)
-  | all (\ (_,ats) -> all (==AnyT) ats) m2 -- no further argument restrictions
-    && all (`elem` map fst m2) m1       = Just []
-  | otherwise                           = Nothing
+makeSubtypeOfCT _         AnyT        = Just []
+makeSubtypeOfCT (v,atype) (MCons cts) =
+  caseAType
+    (\qs ->
+      if all (\ (_,ats) -> all (==AnyT) ats) cts -- no argument restrictions
+         && all (`elem` map fst cts) qs
+        then Just []
+        else Nothing)
+    (Just [(v, callType2AType (MCons cts))])
+    atype
 
+--- Join the abstract types for each variable in an abstract type environment.
 joinVarATypes :: [(Int,AType)] -> [(Int,AType)]
 joinVarATypes vats =
   map (\v -> (v, foldr joinAType anyType

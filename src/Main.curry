@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version August 2023
+--- @version September 2023
 -------------------------------------------------------------------------
 
 module Main where
@@ -18,8 +18,9 @@ import Debug.Trace ( trace )
 
 -- Imports from dependencies:
 import Analysis.ProgInfo
-import Analysis.Values
 import Analysis.Types
+import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons, joinAType
+                       , lubAType, showAType, resultValueAnalysis )
 import CASS.Server                ( analyzeGeneric, analyzePublic )
 import Control.Monad.Trans.Class  ( lift )
 import Control.Monad.Trans.State  ( StateT, get, put, execStateT )
@@ -47,7 +48,7 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 14/08/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 14/09/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -397,27 +398,40 @@ addVarAnyType :: Int -> VerifyStateM ()
 addVarAnyType v = addVarType (v, IOT [([], anyType)], [])
 
 -- Gets the call type for a given operation.
+-- The trivial call type is returned for encapsulated search operations.
 getCallType :: QName -> Int -> VerifyStateM [[CallType]]
-getCallType qf ar = do
+getCallType qf ar
+  | isEncSearchOp qf || isSetFunOp qf
+  = return trivialCallType
+  | otherwise
+  = do
   st <- get
   return $ maybe
     (maybe (trace ("Warning: call type of operation " ++ show qf ++
-                   " not found!") [take ar (repeat AnyT)])
+                   " not found!") trivialCallType)
            id
            (lookup qf (vstImpCallTypes st)))
     id
     (lookup qf (vstCallTypes st))
+ where
+  trivialCallType = [take ar (repeat AnyT)]
 
 -- Gets the in/out type for an operation of a given arity.
 -- If the operation is not found, returns a general type.
+-- The trivial in/out type is returned for encapsulated search operations.
 getFuncType :: QName -> Int -> VerifyStateM InOutType
-getFuncType qf ar = do
-  st <- get
-  maybe (do lift $ putStrLn $ "WARNING: in/out type of " ++ show qf ++
-                              " not found!"
-            return $ IOT [(take ar (repeat anyType), anyType)])
-        return
-        (lookup qf (vstFuncTypes st))
+getFuncType qf ar
+  | isEncSearchOp qf || isSetFunOp qf
+  = return trivialInOutType
+  | otherwise
+  = do st <- get
+       maybe (do lift $ putStrLn $ "WARNING: in/out type of " ++ show qf ++
+                                   " not found!"
+                 return trivialInOutType)
+             return
+             (lookup qf (vstFuncTypes st))
+ where
+  trivialInOutType = IOT [(take ar (repeat anyType), anyType)]
 
 -- Increment number of non-trivial calls.
 incrNonTrivialCall :: VerifyStateM ()
@@ -466,7 +480,7 @@ verifyFuncRule vs exp = do
           atargs = map callType2AType ctargs
       setVarTypes (map (\ (v,at) -> (v, IOT [([],at)], [])) (zip vs atargs))
       showVarExpTypes
-      verifyExpr exp
+      verifyExpr True exp
       return ()
   printIfVerb 2 $ take 70 (repeat '-')
 
@@ -488,19 +502,25 @@ showExp :: Expr -> String
 showExp e =
   pPrint (FCP.ppExp FCP.defaultOptions { FCP.qualMode = FCP.QualNone} e)
 
--- Verify an expression and return the variable used to identify it.
-verifyExpr :: Expr -> VerifyStateM Int
-verifyExpr exp = case exp of
-  Var v -> do iots <- verifyVarExpr v exp
+-- Verify an expression (if the first argument is `True`) and,
+-- if the expression is not a variable, create a fresh
+-- variable and a binding for this variable.
+-- The variable which identifies the expression is returned.
+verifyExpr :: Bool -> Expr -> VerifyStateM Int
+verifyExpr verifyexp exp = case exp of
+  Var v -> do iots <- if verifyexp then verifyVarExpr v exp
+                                   else return [(v, IOT [([], anyType)], [])]
               mapM addVarType iots
               return v
   _     -> do v <- newFreshVarIndex
               addVarExps [(v,exp)]
-              iots <- verifyVarExpr v exp
+              iots <- if verifyexp then verifyVarExpr v exp
+                                   else return [(v, IOT [([], anyType)], [])]
               mapM addVarType iots
               return v
 
--- Verify an expression identified by variable (first argument)
+-- Verify an expression identified by variable (first argument).
+-- The in/out variable types collected for the variable are returned.
 verifyVarExpr :: Int -> Expr -> VerifyStateM [VarType]
 verifyVarExpr ve exp = case exp of
   Var v         -> if v == ve
@@ -515,7 +535,14 @@ verifyVarExpr ve exp = case exp of
                        return $ map (\ (_,iots,vs) -> (ve,iots,vs)) vtypes
   Lit l         -> return [(ve, IOT [([], aCons (lit2cons l))], [])]
   Comb ct qf es -> do
-    vs <- mapM verifyExpr es
+    vs <- if isEncSearchOp qf
+            then -- for encapsulated search, failures in arguments are hidden
+                 mapM (verifyExpr False) es
+            else if isSetFunOp qf
+                   then -- for a set function, the function argument is hidden
+                        mapM (\ (i,e) -> verifyExpr (i>0) e)
+                             (zip [0..] es)
+                   else mapM (verifyExpr True) es
     case ct of
       FuncCall -> do opts <- getToolOptions
                      verifyFuncCall (optError opts) exp qf vs
@@ -544,7 +571,7 @@ verifyVarExpr ve exp = case exp of
   Or e1 e2      -> do iots1 <- verifyVarExpr ve e1 -- 
                       iots2 <- verifyVarExpr ve e2
                       return (iots1 ++ iots2)
-  Case _ ce bs  -> do cv <- verifyExpr ce
+  Case _ ce bs  -> do cv <- verifyExpr True ce
                       verifyMissingBranches exp cv bs
                       iotss <- mapM (verifyBranch cv ve) bs
                       return (concat iotss)
@@ -626,7 +653,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
   currfn <- getCurrentFuncName
   let lits = lit : map (patLiteral . branchPattern) bs
   cvtype <- getVarTypes >>= return . getVarType casevar
-  unless (subtypeAT cvtype (MCons (map (\l -> (lit2cons l,[])) lits))) $ do
+  unless (subtypeAT cvtype (MCons (map (\l -> (lit2cons l, [])) lits))) $ do
     printIfVerb 2 $ showIncompleteBranch currfn exp [] ++ "\n"
     showVarExpTypes
     addMissingCase exp []

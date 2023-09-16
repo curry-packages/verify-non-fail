@@ -3,7 +3,7 @@
 --- and manipulate such types.
 ---
 --- @author Michael Hanus
---- @version July 2023
+--- @version September 2023
 ------------------------------------------------------------------------------
 
 module Verify.IOTypes
@@ -14,7 +14,8 @@ module Verify.IOTypes
 
 import Data.List
 import Data.Maybe      ( mapMaybe )
-import Analysis.Values
+import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons
+                       , joinAType, lubAType, showAType )
 import FlatCurry.Types
 
 import Debug.Trace ( trace )
