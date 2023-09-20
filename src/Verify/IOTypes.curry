@@ -197,9 +197,8 @@ simplifyVarTypes = simpDefVarTypes []
   -- Extracts the definitive types (arguments/results) from a given var type.
   definitiveVarTypesFrom :: VarType -> [(Int,AType)]
   definitiveVarTypesFrom iot = case iot of
-    (v, IOT [([],rt)], []) | rt /= anyType -> [(v,rt)]
-    (_, IOT [(ats,_)], vs)                 -> zip vs ats
-    _                                      -> []
+    (v, IOT [(ats,rt)], vs) -> filter ((/= anyType) . snd) ((v,rt) : zip vs ats)
+    _                       -> []
 
   -- propagate definite variable types into a set of in/out variable types:
   propagateDefTypes :: [(Int,AType)] -> [VarType] -> [VarType]

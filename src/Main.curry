@@ -33,7 +33,7 @@ import FlatCurry.NormalizeLet
 import qualified FlatCurry.Pretty as FCP
 import FlatCurry.Types
 import System.CurryPath           ( runModuleAction )
-import System.Directory           ( createDirectoryIfMissing, doesFileExist )
+import System.Directory           ( createDirectoryIfMissing, doesFileExist, removeDirectory )
 import System.FilePath            ( (</>) )
 import Text.Pretty                ( pPrint )
 
@@ -397,6 +397,18 @@ addVarType vartype = do
 addVarAnyType :: Int -> VerifyStateM ()
 addVarAnyType v = addVarType (v, IOT [([], anyType)], [])
 
+-- Removes an `Any` type for a given variable from the current
+-- set of variable types.
+-- Used to remove the initial `Any` types in let bindings.
+removeVarAnyType :: Int -> VerifyStateM ()
+removeVarAnyType v = do
+  st <- get
+  put $ st { vstVarTypes = filter (not . isAnyTypeForV) (vstVarTypes st) }
+ where
+  isAnyTypeForV (var,vt,vs) = var == v &&
+    case (vt,vs) of (IOT [([], at)], []) -> at == anyType
+                    _                    -> False
+
 -- Gets the call type for a given operation.
 -- The trivial call type is returned for encapsulated search operations.
 getCallType :: QName -> Int -> VerifyStateM [[CallType]]
@@ -558,10 +570,10 @@ verifyVarExpr ve exp = case exp of
       _        -> -- note: also partial calls are considered as constr.
                   do return [consIOType qf vs ve]
   Let bs e      -> do addVarExps bs
-                      vts <- getVarTypes
                       mapM_ (addVarAnyType . fst) bs
                       iotss <- mapM (\ (v,be) -> verifyVarExpr v be) bs
-                      setVarTypes vts -- set to old var types with v/anyType
+                      -- remove initially set anyType's for the bound vars:
+                      mapM_ (removeVarAnyType . fst) bs
                       mapM_ addVarType (concat iotss)
                       mapM_ (addAnyTypeIfUnknown . fst) bs
                       verifyVarExpr ve e
