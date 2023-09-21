@@ -35,7 +35,7 @@ import FlatCurry.Types
 import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist, removeDirectory )
 import System.FilePath            ( (</>) )
-import Text.Pretty                ( pPrint )
+import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
 
 -- Imports from package modules:
 import Verify.CallTypes
@@ -510,14 +510,21 @@ showVarExpTypes = do
     st <- get
     lift $ putStr $ "Current set of variables in function " ++ snd qf ++
                     ":\nVariable bindings:\n" ++
-      unlines (map (\ (v,e) -> 'v' : show v ++ " |-> " ++ showExp e)
-                         (vstVarExp st))
+                    unlines (map (\ (v,e) -> showBindExp v e) (vstVarExp st))
     vartypes <- getVarTypes
     lift $ putStr $ "Variable types\n" ++ showVarTypes vartypes
 
+-- Shows a pretty-printed variable binding to a FlatCurry expression.
+showBindExp :: Int -> Expr -> String
+showBindExp bv e = pPrint $ text ('v' : show bv ++ " |-> ") <+> align (ppExp e)
+
+-- Shows a pretty-printed FlatCurry expression.
 showExp :: Expr -> String
-showExp e =
-  pPrint (FCP.ppExp FCP.defaultOptions { FCP.qualMode = FCP.QualNone} e)
+showExp e = pPrint (ppExp e)
+
+-- Pretty prints a FlatCurry expression.
+ppExp :: Expr -> Doc
+ppExp e = FCP.ppExp FCP.defaultOptions { FCP.qualMode = FCP.QualNone} e
 
 -- Verify an expression (if the first argument is `True`) and,
 -- if the expression is not a variable, create a fresh
