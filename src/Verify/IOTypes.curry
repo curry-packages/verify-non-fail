@@ -8,7 +8,7 @@
 
 module Verify.IOTypes
   ( InOutType(..), isAnyIOType, showIOT, inOutATypeFunc
-  , VarType, showVarTypes, simplifyVarTypes, bindVarInIOTypes
+  , VarType, showVarTypes, showArgumentVars, simplifyVarTypes, bindVarInIOTypes
   )
  where
 
@@ -166,7 +166,12 @@ showVarTypes :: [VarType] -> String
 showVarTypes = unlines . map showVarType
  where
   showVarType (rv, iot, argvs) =
-    show rv ++ ": " ++ showIOT iot ++ " " ++ show argvs
+    'v' : show rv ++ ": " ++ showIOT iot ++ " " ++ showArgumentVars argvs
+
+--- Shows a list of argument variables in parentheses.
+showArgumentVars :: [Int] -> String
+showArgumentVars argvs =
+  "(" ++ intercalate "," (map (\v -> 'v' : show v) argvs) ++ ")"
 
 --- Simplify a set of input/output variable types.
 simplifyVarTypes :: [VarType] -> [VarType]

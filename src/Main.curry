@@ -48,7 +48,7 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 14/09/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 21/09/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -120,6 +120,7 @@ verifyModule astore opts mname = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
+       showVerifyResult opts st mname fdecls
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -150,17 +151,7 @@ tryVerifyProg :: Options -> Int -> VerifyState -> String
 tryVerifyProg opts numits vstate mname funusage fdecls = do
   st <- execStateT (mapM_ verifyFunc fdecls) vstate
   let newfailures = vstNewFailed st
-  if null (vstFailedFuncs st) && null (vstPartialBranches st)
-    then do
-      putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
-      let pubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
-                                              not (isTotalCallType ct))
-                                (vstCallTypes st)
-      if null pubcalltypes || optVerb opts == 0
-        then putStrLn "\n"
-        else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL PUBLIC CALL TYPES:"
-               : showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
-    else unless (null newfailures || optVerb opts < 2) $ printFailures st
+  unless (null newfailures || optVerb opts < 2) $ printFailures st
   unless (null newfailures) $ printWhenStatus opts $ unlines $
     "Operations with refined call types (used in future analyses):" :
     showFunResults prettyFunCallTypes (reverse newfailures)
@@ -182,19 +173,33 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
         "(" ++ show (length newfdecls) ++ " functions)"
       tryVerifyProg opts (numits + 1) st' mname funusage newfdecls
  where
-  visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
+  failLine = take 78 (repeat '!')
+  failComment = failLine ++ "\nPROGRAM CONTAINS POSSIBLY FAILING "
 
   printFailures st = do
     unless (null (vstFailedFuncs st)) $
-      putStrLn $ "PROGRAM CONTAINS POSSIBLY FAILING FUNCTION CALLS:\n" ++
+      putStrLn $ failComment ++ "FUNCTION CALLS:\n" ++
          unlines (map (\ (qf,_,e) -> "Function '" ++ snd qf ++
                                      "': call '" ++ showExp e ++ "'")
-                      (reverse (vstFailedFuncs st)))
+                      (reverse (vstFailedFuncs st)) ++ [failLine])
     unless (null (vstPartialBranches st)) $
-      putStrLn $ "PROGRAM CONTAINS POSSIBLY FAILING FUNCTIONS:\n" ++
+      putStrLn $ failComment ++ "FUNCTIONS:\n" ++
          unlines
            (map (\ (qf,_,e,cs) -> showIncompleteBranch qf e cs)
-                (reverse (vstPartialBranches st)))
+                (reverse (vstPartialBranches st)) ++ [failLine])
+
+showVerifyResult :: Options -> VerifyState -> String -> [FuncDecl] -> IO ()
+showVerifyResult opts vst mname fdecls = do
+  putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
+  let pubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
+                                          not (isTotalCallType ct))
+                            (vstCallTypes vst)
+  if null pubcalltypes || optVerb opts == 0
+    then putStrLn "\n"
+    else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL PUBLIC CALL TYPES:"
+           : showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
+ where
+  visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
 
 -- Shows a message about an incomplete branch.
 -- If the third argument is the empty list, it is a literal branch.
@@ -505,7 +510,7 @@ showVarExpTypes = do
     st <- get
     lift $ putStr $ "Current set of variables in function " ++ snd qf ++
                     ":\nVariable bindings:\n" ++
-      unlines (map (\ (v,e) -> show v ++ " |-> " ++ showExp e)
+      unlines (map (\ (v,e) -> 'v' : show v ++ " |-> " ++ showExp e)
                          (vstVarExp st))
     vartypes <- getVarTypes
     lift $ putStr $ "Variable types\n" ++ showVarTypes vartypes
@@ -611,7 +616,7 @@ verifyFuncCall errorfail exp qf vs
         incrNonTrivialCall
         currfn <- getCurrentFuncName
         printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
-                        snd qf ++ " " ++ show vs ++
+                        snd qf ++ showArgumentVars vs ++
                         " w.r.t. call type: " ++ prettyFunCallTypes ctype
         showVarExpTypes
         allvts <- getVarTypes
