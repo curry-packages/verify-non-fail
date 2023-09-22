@@ -91,8 +91,11 @@ verifyModule astore opts mname = do
     then do putStrLn $ unlines $ "CALL TYPES OF ALL OPERATIONS:" :
                        showFunResults prettyFunCallTypes calltypes
     else when (optVerb opts > 1 || optCallTypes opts) $
-      putStrLn $ unlines $ "NON-TRIVIAL CALL TYPES OF PUBLIC OPERATIONS:" :
-        showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
+      putStrLn $ unlines $
+        ("NON-TRIVIAL CALL TYPES OF " ++
+         (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
+        showFunResults prettyFunCallTypes
+         (sortFunResults (if optPublic opts then pubcalltypes else ntcalltypes))
   rvinfo <- loadAnalysisWithImports astore resultValueAnalysis opts flatprog
   let iotypes      = map (inOutATypeFunc (cass2AType rvinfo)) fdecls
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
@@ -102,8 +105,10 @@ verifyModule astore opts mname = do
            showFunResults showIOT iotypes
     else when (optVerb opts > 1 || optIOTypes opts) $
       putStrLn $ unlines $
-        "NON-TRIVIAL INPUT/OUTPUT TYPES OF PUBLIC OPERATIONS:" :
-        showFunResults showIOT (sortFunResults pubntiotypes)
+        ("NON-TRIVIAL INPUT/OUTPUT TYPES OF " ++
+         (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
+        showFunResults showIOT
+          (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
   let vstate = initVerifyState fdecls allconsar impcalltypes calltypes
                                (iotypes ++ impiotypes) opts
       funusage = funcDecls2Usage mname (progFuncs flatprog)
@@ -191,14 +196,15 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
 showVerifyResult :: Options -> VerifyState -> String -> [FuncDecl] -> IO ()
 showVerifyResult opts vst mname fdecls = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
-  let pubcalltypes = filter (\ (qf,ct) -> qf `elem` visfuncs &&
-                                          not (isTotalCallType ct))
+  let calltypes = filter (\ (qf,ct) -> not (isTotalCallType ct) && showFun qf)
                             (vstCallTypes vst)
-  if null pubcalltypes || optVerb opts == 0
+  if null calltypes || optVerb opts == 0
     then putStrLn "\n"
-    else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL PUBLIC CALL TYPES:"
-           : showFunResults prettyFunCallTypes (sortFunResults pubcalltypes)
+    else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL CALL TYPES:"
+           : showFunResults prettyFunCallTypes (sortFunResults calltypes)
  where
+  showFun qf = not (optPublic opts) || qf `elem` visfuncs
+
   visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
 
 -- Shows a message about an incomplete branch.

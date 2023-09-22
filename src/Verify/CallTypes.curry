@@ -187,12 +187,32 @@ initCallTypeState opts qf vs =
 --- Computes the call type of a function where all constructors are
 --- provided as the second argument.
 callTypeFunc :: Options -> [[QName]] -> FuncDecl -> (QName,[[CallType]])
-callTypeFunc opts allcons (Func qf ar _ _ rule) = case rule of
-  External _  -> callTypeExternalFunc qf ar
-  Rule vs exp -> if length vs /= ar
-                   then error $ "Func " ++ show qf ++ ": inconsistent variables"
-                   else (qf, simpFuncCallType allcons
-                              (callTypeExpr (initCallTypeState opts qf vs) exp))
+callTypeFunc opts allcons (Func qf ar _ _ rule) =
+  maybe
+    (case rule of
+       External _  -> callTypeExternalFunc qf ar
+       Rule vs exp ->
+         if length vs /= ar
+           then error $ "Func " ++ show qf ++ ": inconsistent variables"
+           else (qf, simpFuncCallType allcons
+                       (callTypeExpr (initCallTypeState opts qf vs) exp)))
+     (\ct -> (qf,ct))
+     (lookup qf defaultCallTypes)
+
+--- Some call types for predefined operations.
+--- The fail call types for arithmetic operations could be improved
+--- in the future by considering refined number types.
+defaultCallTypes :: [(QName,[[CallType]])]
+defaultCallTypes =
+  map (\qf -> (pre qf, failCallType))
+      [ "=:=", "=:<=", "=:<<=", "divFloat", "prim_divFloat"
+      , "divInt", "prim_divInt", "modInt", "prim_modInt"
+      , "quotInt", "prim_quotInt", "remInt", "prim_remInt"
+      , "sqrtFloat", "prim_sqrtFloat"
+      ] ++
+  [ (pre "&",   [[MCons [(pre "True",[])], MCons [(pre "True",[])]]])
+  , (pre "cond",[[MCons [(pre "True",[])], AnyT]])
+  ]
 
 --- Computes the call type of an external (primitive) function.
 --- Currently, we assume that they are total functions.

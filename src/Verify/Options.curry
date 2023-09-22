@@ -24,6 +24,7 @@ data Options = Options
   { optVerb      :: Int   -- verbosity (0: quiet, 1: status, 2: interm, 3: all)
   , optHelp      :: Bool  -- if help info should be printed
   , optRerun     :: Bool  -- rerun verification of current module
+  , optPublic    :: Bool  -- show types (call, in/out) of public ops only? 
   , optCallTypes :: Bool  -- show call types
   , optIOTypes   :: Bool  -- show input/output types
   , optVerify    :: Bool  -- verify call types
@@ -35,7 +36,8 @@ data Options = Options
 
 --- The default options of the verification tool.
 defaultOptions :: Options
-defaultOptions = Options 1 False False False False True False False False False
+defaultOptions =
+  Options 1 False False True False False True False False False False
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -67,6 +69,9 @@ options =
   , Option "v" ["verbosity"]
             (OptArg (maybe (checkVerb 2) (safeReadNat checkVerb)) "<n>")
             "verbosity level:\n0: quiet (same as `-q')\n1: show status messages (default)\n2: show intermediate results (same as `-v')\n3: show all details"
+  , Option "a" ["all"]
+            (NoArg (\opts -> opts { optPublic = False }))
+           "show types for all (also private) operations"
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
            "show call types"
