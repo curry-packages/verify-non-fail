@@ -46,14 +46,17 @@ showIOT (IOT iots) = "{" ++ intercalate " || " (map showIOType iots) ++ "}"
   showIOType (ict,oct) = "(" ++ intercalate "," (map showAType ict) ++ ")" ++
                          " |-> " ++ showAType oct
 
---- Normalize InOutTypes by joining results of IOTypes with identical arguments.
+--- Normalize InOutTypes by
+--- * removing alternatives with empty output type
+--- * joining results of IOTypes with identical arguments
 normalizeIOT :: InOutType -> InOutType
-normalizeIOT (IOT iotypes) = IOT (norm iotypes)
+normalizeIOT (IOT iotypes) =
+  IOT (joinOuts (filter ((/= emptyType) . snd) iotypes))
  where
-  norm []               = []
-  norm ((ict,oct):iots) =
+  joinOuts []               = []
+  joinOuts ((ict,oct):iots) =
     let (iots1,iots2) = partition ((== ict) . fst) iots
-    in (ict, foldr1 lubAType (oct : map snd iots1)) : norm iots2
+    in (ict, foldr1 lubAType (oct : map snd iots1)) : joinOuts iots2
 
 ------------------------------------------------------------------------------
 --- The state passed to compute call types contains a mapping from

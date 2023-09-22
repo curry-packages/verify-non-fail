@@ -48,7 +48,7 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 21/09/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 22/09/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
