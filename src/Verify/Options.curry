@@ -31,7 +31,7 @@ data Options = Options
   , optError     :: Bool  -- consider Prelude.error as failing operation?
   , optStats     :: Bool  -- show statitics?
   , optTime      :: Bool  -- show elapsed verification time?
-  , optWrite     :: Bool  -- write a `CALLTYPES` module for later use?
+  , optWrite     :: Bool  -- write a `CALLTYPES` module or statistic files?
   }
 
 --- The default options of the verification tool.
@@ -95,7 +95,7 @@ options =
            "show total verification time for each module"
   , Option "w" ["write"]
            (NoArg (\opts -> opts { optWrite = True }))
-           "write  a '..._CALLTYPES' module with required\ncall types"
+           "write  a '..._CALLTYPES' module with required\ncall types or statistic files"
   ]
  where
   safeReadNat opttrans s opts = case readNat s of

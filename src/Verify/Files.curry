@@ -41,7 +41,7 @@ import Verify.Options
 -- The name of the file containing statistical information about the
 -- verification of a module.
 statsFile :: String -> String
-statsFile mname = verifyDataDir </> mname ++ "-STATISTICS"
+statsFile mname = mname ++ "-STATISTICS"
 
 --- The name of the directory containing all data generated and used by
 --- this tool.
@@ -71,11 +71,13 @@ callTypesModule mname = mname ++ "_CALLTYPES"
 
 ------------------------------------------------------------------------------
 -- Show statistics in textual and in CSV format:
-showStatistics :: Int -> Int -> Bool -> Int -> Int -> Int -> Int -> Int
-               -> Int -> Int -> Int -> (Int,Int) -> (String, [String])
-showStatistics vtime numits withverify numallfuncs numvisfuncs
-               numpubiotypes numalliotypes numpubcalltypes numallcalltypes
-               numnewpubcalltypes numnewcalltypes (numcalls, numcases) =
+showStatistics :: Int -> Int -> Bool -> (Int,Int) -> (Int,Int) -> (Int,Int)
+               -> ([(QName,[[CallType]])], [(QName,[[CallType]])])
+               -> (Int,Int) -> (String, [String])
+showStatistics vtime numits withverify (numvisfuncs, numallfuncs)
+               (numpubiotypes, numalliotypes)
+               (numpubcalltypes, numallcalltypes)
+               (ntfinalpubcts, ntfinalcts) (numcalls, numcases) =
   ( unlines $
       [ "Functions                      (public / all): " ++
         show numvisfuncs ++ " / " ++ show numallfuncs
@@ -84,27 +86,35 @@ showStatistics vtime numits withverify numallfuncs numvisfuncs
       , "Initial non-trivial call types (public / all): " ++
         show numpubcalltypes ++ " / " ++ show numallcalltypes ] ++
       (if withverify
-          then [ "Final non-trivial call types   (public / all): " ++
-                 show numnewpubcalltypes ++ " / " ++ show numnewcalltypes
-               , "Non-trivial function calls checked           : " ++
-                   show numcalls
-               , "Incomplete case expressions checked          : " ++
-                   show numcases
-               , "Number of iterations for call-type inference : " ++
-                 show numits
-               , "Total verification in msecs                  : " ++
-                 show vtime ]
-          else [])
+         then [ "Final non-trivial call types   (public / all): " ++
+                show numntfinalpubcts ++ " / " ++ show numntfinalcts
+              , "Final failing call types   (public / all)    : " ++
+                show numfailpubcts ++ " / " ++ show numfailcts
+              , "Non-trivial function calls checked           : " ++
+                show numcalls
+              , "Incomplete case expressions checked          : " ++
+                show numcases
+              , "Number of iterations for call-type inference : " ++
+                show numits
+              , "Total verification in msecs                  : " ++
+                show vtime ]
+         else [])
   , map show [ numvisfuncs, numallfuncs, numpubiotypes, numalliotypes
              , numpubcalltypes, numallcalltypes
-             , numnewpubcalltypes, numnewcalltypes
+             , numntfinalpubcts, numntfinalcts
+             , numfailpubcts, numfailcts
              , numcalls, numcases, numits, vtime ]
   )
+ where
+  numntfinalpubcts = length ntfinalpubcts
+  numntfinalcts    = length ntfinalcts
+  numfailpubcts    = length (filter (isFailCallType . snd) ntfinalpubcts)
+  numfailcts       = length (filter (isFailCallType . snd) ntfinalcts)
 
 --- Store the statitics for a module in a text and a CSV file.
-storeStatistics :: String -> String -> [String] -> IO ()
-storeStatistics mname stattxt statcsv = do
-  writeFile (statsFile mname) stattxt
+storeStatistics :: Options -> String -> String -> [String] -> IO ()
+storeStatistics opts mname stattxt statcsv = when (optWrite opts) $ do
+  writeFile    (statsFile mname ++ ".txt") stattxt
   writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
 
 ------------------------------------------------------------------------------
@@ -324,8 +334,7 @@ funArgsOfExp exp = case exp of
 writeCallTypeSpecMod :: Options -> String -> [(QName,[[CallType]])] -> IO ()
 writeCallTypeSpecMod opts mname pubntcalltypes = do
   let ctmname = callTypesModule mname
-      ctfile  = callTypesDataDir </> modNameToPath ctmname ++ ".curry"
-  createDirectoryIfMissing True (dropFileName ctfile)
+      ctfile  = ctmname ++ ".curry"
   exct <- doesFileExist ctfile
   if null pubntcalltypes
     then when exct $ removeFile ctfile
@@ -339,8 +348,8 @@ writeCallTypeSpecMod opts mname pubntcalltypes = do
           "A Curry module '" ++ ctmname ++
           "' with required call types is written to\n'" ++ ctfile ++ "'.\n" ++
           "To use it for future verifications, store it\n" ++
-          "- either in the source directory of module '" ++ mname ++ "'\n" ++
-          "- or under '" ++ includepath ++ "'"
+          "- either under '" ++ includepath ++ "'" ++
+          "- or in the source directory of module '" ++ mname ++ "'\n"
 
 --- Transforms call types to an AbstractCurry module which can be read
 --- with `readCallTypeSpecMod`.

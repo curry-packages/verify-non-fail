@@ -48,7 +48,7 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 22/09/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 27/09/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -137,16 +137,16 @@ verifyModule astore opts mname = do
       newntcalltypes    = filter (not . isTotalCallType . snd) newcalltypes
       newpubntcalltypes = filter ((`elem` visfuncs) . fst) newntcalltypes
   let (stattxt,statcsv) = showStatistics vtime vnumits (optVerify opts)
-                            (length fdecls) (length visfuncs)
-                            (length pubntiotypes) (length ntiotypes)
-                            (length pubcalltypes) (length ntcalltypes)
-                            (length newpubntcalltypes) (length newntcalltypes)
+                            (length visfuncs, length fdecls)
+                            (length pubntiotypes, length ntiotypes)
+                            (length pubcalltypes, length ntcalltypes)
+                            (newpubntcalltypes, newntcalltypes)
                             (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
     storeTypes opts mname (allConsOfTypes (progTypes flatprog))
                newpubntcalltypes newcalltypes iotypes
-    storeStatistics mname stattxt statcsv
+    storeStatistics opts mname stattxt statcsv
 
 -- Try to verify a module, possibly in several iterations.
 -- The second argument is the number of already performed iterations,
