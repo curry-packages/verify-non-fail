@@ -48,15 +48,16 @@ import Verify.Options
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 27/09/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 28/09/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
 main = do
   args <- getArgs
   (opts,progs) <- processOptions banner args
+  when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts
   case progs of
-    [] -> error "Module name missing"
+    [] -> unless (optDeleteCache opts) $ error "Module name missing"
     ms -> do astore <- newIORef (AnaStore [])
              mapM_ (runModuleAction (verifyModule astore opts)) ms
 

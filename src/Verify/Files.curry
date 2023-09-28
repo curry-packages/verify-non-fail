@@ -1,19 +1,26 @@
 ------------------------------------------------------------------------------
 --- Operations to write and read auxiliary files containing
 --- verification information.
+--- 
+--- The tool caches already computed analysis results about modules
+--- under the directory defined in `getVerifyCacheDirectory` which
+--- is usually `~/.curry_verifycache/...`.
 ---
 --- @author Michael Hanus
---- @version July 2023
+--- @version September 2023
 -----------------------------------------------------------------------------
 
 module Verify.Files
-   ( readTypesOfModules, readPublicCallTypeModule, readCallTypeFile
+   ( deleteVerifyCacheDirectory
+   , readTypesOfModules, readPublicCallTypeModule, readCallTypeFile
    , showStatistics, storeStatistics, storeTypes
    )
   where
 
 import Control.Monad        ( unless, when )
-import Data.List            ( isPrefixOf, isSuffixOf, sortBy )
+import Data.List            ( intercalate, isPrefixOf, isSuffixOf, sortBy )
+
+import Curry.Compiler.Distribution ( installDir )
 
 import AbstractCurry.Build
 import AbstractCurry.Files  ( readCurry )
@@ -25,8 +32,10 @@ import Data.Time            ( ClockTime, compareClockTime )
 import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
                             , modNameToPath )
 import System.Directory
-import System.FilePath      ( (</>), dropFileName, joinPath, splitDirectories )
-import System.IOExts        ( readCompleteFile )
+import System.FilePath      ( (</>), (<.>), dropDrive, dropFileName, isAbsolute
+                            , joinPath, splitDirectories )
+import System.IOExts        ( evalCmd, readCompleteFile )
+import System.Process       ( system )
 import Text.CSV
 
 import PackageConfig        ( getPackagePath )
@@ -38,36 +47,75 @@ import Verify.Options
 ------------------------------------------------------------------------------
 -- Definition of directory and file names for various data.
 
--- The name of the file containing statistical information about the
--- verification of a module.
-statsFile :: String -> String
-statsFile mname = mname ++ "-STATISTICS"
+-- Cache directory where data files generated and used by this tool are stored.
+-- If $HOME exists, it is `~/.curryverify_cache/<CURRYSYSTEM>`.
+getVerifyCacheDirectory :: IO String
+getVerifyCacheDirectory = do
+  homedir    <- getHomeDirectory
+  hashomedir <- doesDirectoryExist homedir
+  let maindir = if hashomedir then homedir else installDir
+  return $ maindir </> ".curry_verifycache" </>
+           joinPath (tail (splitDirectories currySubdir))
 
---- The name of the directory containing all data generated and used by
---- this tool.
-callTypesDataDir :: String
-callTypesDataDir = "CALLTYPES"
+--- Delete the tool's cache directory (for the Curry system).
+deleteVerifyCacheDirectory :: Options -> IO ()
+deleteVerifyCacheDirectory opts = do
+  cachedir <- getVerifyCacheDirectory
+  exists   <- doesDirectoryExist cachedir
+  when exists $ do
+    printWhenStatus opts $ "Deleting directory '" ++ cachedir ++ "''..."
+    system ("rm -Rf " ++ quote cachedir)
+    return ()
+ where
+  quote s = "\"" ++ s ++ "\""
 
---- The name of the directory containing the computed infos for modules.
-verifyDataDir :: String
-verifyDataDir = callTypesDataDir </> "verifydata" </>
-                joinPath (tail (splitDirectories currySubdir))
+--- Get the file name in which analysis results for a given module
+--- (first argument) which can be found in the load path are stored.
+--- The second argument is a key for the type of analysis information
+--- which is the suffix of the file name.
+getVerifyCacheBaseFile :: String -> String -> IO String
+getVerifyCacheBaseFile moduleName infotype = do
+  analysisDirectory <- getVerifyCacheDirectory
+  let modAnaName = moduleName ++ "-" ++ infotype
+  (fileDir,_) <- findModuleSourceInLoadPath moduleName
+  absfileDir  <- getRealPath fileDir
+  return $ analysisDirectory </> dropDrive absfileDir </> modAnaName
+ where
+  findModuleSourceInLoadPath modname =
+    lookupModuleSourceInLoadPath modname >>=
+    maybe (error $ "Source file for module '" ++ modname ++ "' not found!")
+          return
 
--- The name of the file containing all call types of a module.
-callTypesFile :: String -> String
-callTypesFile mname = verifyDataDir </> mname ++ "-CALLTYPES"
+--- Returns the absolute real path for a given file path
+--- by following all symlinks in all path components.
+getRealPath :: String -> IO String
+getRealPath path = do
+  (rc, out, _) <- evalCmd "realpath" [path] ""
+  if rc == 0 then return (stripSpaces out)
+             else getAbsolutePath path
+ where
+  stripSpaces = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
--- The name of the file containing all input/output types of a module.
-ioTypesFile :: String -> String
-ioTypesFile mname = verifyDataDir </> mname ++ "-IOTYPES"
+-- Gets the name of the file containing all call types of a module.
+getCallTypesFile :: String -> IO String
+getCallTypesFile mname = getVerifyCacheBaseFile mname "CALLTYPES"
 
--- The name of the file containing all constructor of a module.
-consTypesFile :: String -> String
-consTypesFile mname = verifyDataDir </> mname ++ "-CONSTYPES"
+-- Gets the name of the file containing all input/output types of a module.
+getIOTypesFile :: String -> IO String
+getIOTypesFile mname = getVerifyCacheBaseFile mname "IOTYPES"
+
+-- Gets the name of the file containing all constructor of a module.
+getConsTypesFile :: String -> IO String
+getConsTypesFile mname = getVerifyCacheBaseFile mname "CONSTYPES"
 
 -- The name of the Curry module where the call type specifications are stored.
 callTypesModule :: String -> String
 callTypesModule mname = mname ++ "_CALLTYPES"
+
+-- The name of the file containing statistical information about the
+-- verification of a module.
+statsFile :: String -> String
+statsFile mname = mname ++ "-STATISTICS"
 
 ------------------------------------------------------------------------------
 -- Show statistics in textual and in CSV format:
@@ -111,11 +159,13 @@ showStatistics vtime numits withverify (numvisfuncs, numallfuncs)
   numfailpubcts    = length (filter (isFailCallType . snd) ntfinalpubcts)
   numfailcts       = length (filter (isFailCallType . snd) ntfinalcts)
 
---- Store the statitics for a module in a text and a CSV file.
+--- Store the statitics for a module in a text and a CSV file
+--- (if required by the current options).
 storeStatistics :: Options -> String -> String -> [String] -> IO ()
-storeStatistics opts mname stattxt statcsv = when (optWrite opts) $ do
-  writeFile    (statsFile mname ++ ".txt") stattxt
-  writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
+storeStatistics opts mname stattxt statcsv =
+  when (optStats opts && optWrite opts) $ do
+    writeFile    (statsFile mname ++ ".txt") stattxt
+    writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
 
 ------------------------------------------------------------------------------
 -- Stores non-trivial call types and non-trivial input/output types.
@@ -125,11 +175,16 @@ storeTypes :: Options -> String -> [[(QName,Int)]]
            -> [(QName,InOutType)]    -- all input output types
            -> IO ()
 storeTypes opts mname allcons pubntcalltypes calltypes iotypes = do
-  createDirectoryIfMissing True verifyDataDir
-  writeFile (consTypesFile mname) (show allcons)
-  writeFile (callTypesFile mname)
+  patfile <- getVerifyCacheBaseFile mname "..."
+  printWhenAll opts $ "Storing analysis results at '" ++ patfile ++ "'"
+  createDirectoryIfMissing True (dropFileName patfile)
+  csfile <- getConsTypesFile mname
+  ctfile <- getCallTypesFile mname
+  iofile <- getIOTypesFile   mname
+  writeFile csfile (show allcons)
+  writeFile ctfile
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod calltypes)))
-  writeFile (ioTypesFile mname)
+  writeFile iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
   writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
  where
@@ -142,9 +197,9 @@ storeTypes opts mname allcons pubntcalltypes calltypes iotypes = do
 tryReadTypes :: Options -> String
   -> IO (Maybe ([[(QName,Int)]], [(QName,[[CallType]])], [(QName,InOutType)]))
 tryReadTypes opts mname = do
-  let csfile = consTypesFile mname
-      ctfile = callTypesFile mname
-      iofile = ioTypesFile   mname
+  csfile <- getConsTypesFile mname
+  ctfile <- getCallTypesFile mname
+  iofile <- getIOTypesFile   mname
   csexists <- doesFileExist csfile
   ctexists <- doesFileExist ctfile
   ioexists <- doesFileExist iofile
@@ -166,9 +221,12 @@ tryReadTypes opts mname = do
 readTypes :: Options -> String
           -> IO ([[(QName,Int)]], [(QName,[[CallType]])], [(QName,InOutType)])
 readTypes _ mname = do
-  conss <- readFile (consTypesFile mname) >>= return . read
-  cts   <- readFile (callTypesFile mname) >>= return . map read . lines
-  iots  <- readFile (ioTypesFile   mname) >>= return . map read . lines
+  csfile <- getConsTypesFile mname
+  ctfile <- getCallTypesFile mname
+  iofile <- getIOTypesFile   mname
+  conss  <- readFile csfile >>= return . read
+  cts    <- readFile ctfile >>= return . map read . lines
+  iots   <- readFile iofile >>= return . map read . lines
   return (conss,
           map (\ (fn,ct) -> ((mname,fn), ct)) cts,
           map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots)
@@ -201,7 +259,7 @@ readTypesOfModules opts computetypes mnames = do
 readCallTypeFile :: Options -> ClockTime -> String
                  -> IO (Maybe [(QName,[[CallType]])])
 readCallTypeFile opts mtimesrc mname = do
-  let fname = callTypesFile mname
+  fname <- getCallTypesFile mname
   existsf <- doesFileExist fname
   if existsf && not (optRerun opts)
     then do
@@ -259,7 +317,7 @@ readPublicCallTypeModule opts allcons mtimesrc mname = do
       else return []
 
 
---- Reads a call type specificaiton file for a module.
+--- Reads a call type specification file for a module
 --- if it is up-to-date (where the modification time of the module
 --- is passed as the second argument).
 readCallTypeSpecMod :: [[(QName,Int)]] -> String -> String
@@ -347,8 +405,8 @@ writeCallTypeSpecMod opts mname pubntcalltypes = do
         printWhenStatus opts $
           "A Curry module '" ++ ctmname ++
           "' with required call types is written to\n'" ++ ctfile ++ "'.\n" ++
-          "To use it for future verifications, store it\n" ++
-          "- either under '" ++ includepath ++ "'" ++
+          "To use it for future verifications, store this module\n" ++
+          "- either under '" ++ includepath ++ "'\n" ++
           "- or in the source directory of module '" ++ mname ++ "'\n"
 
 --- Transforms call types to an AbstractCurry module which can be read

@@ -3,7 +3,7 @@
 --- related operations.
 ---
 --- @author Michael Hanus
---- @version July 2023
+--- @version September 2023
 -------------------------------------------------------------------------
 
 module Verify.Options
@@ -12,32 +12,38 @@ module Verify.Options
   )
  where
 
+import Curry.Compiler.Distribution ( curryCompiler, curryCompilerMajorVersion
+                                   , curryCompilerMinorVersion
+                                   , curryCompilerRevisionVersion )
+
 import Control.Monad         ( when, unless )
 import Data.Char             ( toUpper )
-import System.Console.GetOpt
+import Data.List             ( intercalate )
 import Numeric               ( readNat )
-import System.Process        ( exitWith )
+import System.Console.GetOpt
 
 import System.CurryPath      ( stripCurrySuffix )
+import System.Process        ( exitWith )
 
 data Options = Options
-  { optVerb      :: Int   -- verbosity (0: quiet, 1: status, 2: interm, 3: all)
-  , optHelp      :: Bool  -- if help info should be printed
-  , optRerun     :: Bool  -- rerun verification of current module
-  , optPublic    :: Bool  -- show types (call, in/out) of public ops only? 
-  , optCallTypes :: Bool  -- show call types
-  , optIOTypes   :: Bool  -- show input/output types
-  , optVerify    :: Bool  -- verify call types
-  , optError     :: Bool  -- consider Prelude.error as failing operation?
-  , optStats     :: Bool  -- show statitics?
-  , optTime      :: Bool  -- show elapsed verification time?
-  , optWrite     :: Bool  -- write a `CALLTYPES` module or statistic files?
+  { optVerb        :: Int  -- verbosity (0: quiet, 1: status, 2: interm, 3: all)
+  , optHelp        :: Bool -- if help info should be printed
+  , optDeleteCache :: Bool -- delete the analysis cache?
+  , optRerun       :: Bool -- rerun verification of current module
+  , optPublic      :: Bool -- show types (call, in/out) of public ops only? 
+  , optCallTypes   :: Bool -- show call types
+  , optIOTypes     :: Bool -- show input/output types
+  , optVerify      :: Bool -- verify call types
+  , optError       :: Bool -- consider Prelude.error as failing operation?
+  , optStats       :: Bool -- show statitics?
+  , optTime        :: Bool -- show elapsed verification time?
+  , optWrite       :: Bool -- write a `CALLTYPES` module or statistic files?
   }
 
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
-  Options 1 False False True False False True False False False False
+  Options 1 False False False True False False True False False False False
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -75,12 +81,15 @@ options =
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
            "show call types"
-  , Option "i" ["iotypes"]
-            (NoArg (\opts -> opts { optIOTypes = True }))
-           "show input/output types"
+  , Option "" ["delete"]
+           (NoArg (\opts -> opts { optDeleteCache = True }))
+           ("delete all cache files (for " ++ sysname ++ ")")
   , Option "e" ["error"]
            (NoArg (\opts -> opts { optError = True }))
            "consider 'Prelude.error' as a failing operation"
+  , Option "i" ["iotypes"]
+            (NoArg (\opts -> opts { optIOTypes = True }))
+           "show input/output types"
   , Option "n" ["noverify"]
            (NoArg (\opts -> opts { optVerify = False }))
            "do not verify call types in function calls"
@@ -105,6 +114,12 @@ options =
   checkVerb n opts = if n>=0 && n<4
                        then opts { optVerb = n }
                        else error "Illegal verbosity level (try `-h' for help)"
+
+  sysname = curryCompiler ++ "-" ++
+            intercalate "."
+              (map show [ curryCompilerMajorVersion
+                        , curryCompilerMinorVersion
+                        , curryCompilerRevisionVersion ])
 
 -------------------------------------------------------------------------
 
