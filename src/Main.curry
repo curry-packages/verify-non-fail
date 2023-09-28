@@ -43,6 +43,7 @@ import Verify.Files
 import Verify.Helpers
 import Verify.IOTypes
 import Verify.Options
+import Verify.Statistics
 
 ------------------------------------------------------------------------------
 banner :: String
