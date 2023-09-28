@@ -35,9 +35,9 @@ data Options = Options
   , optIOTypes     :: Bool -- show input/output types
   , optVerify      :: Bool -- verify call types
   , optError       :: Bool -- consider Prelude.error as failing operation?
-  , optStats       :: Bool -- show statitics?
+  , optModule      :: Bool -- generate a `..._CALLTYPES` module?
+  , optStats       :: Bool -- show and store statitics?
   , optTime        :: Bool -- show elapsed verification time?
-  , optWrite       :: Bool -- write a `CALLTYPES` module or statistic files?
   }
 
 --- The default options of the verification tool.
@@ -90,6 +90,9 @@ options =
   , Option "i" ["iotypes"]
             (NoArg (\opts -> opts { optIOTypes = True }))
            "show input/output types"
+  , Option "m" ["module"]
+           (NoArg (\opts -> opts { optModule = True }))
+           "write  a '..._CALLTYPES' module with required\ncall types"
   , Option "n" ["noverify"]
            (NoArg (\opts -> opts { optVerify = False }))
            "do not verify call types in function calls"
@@ -98,13 +101,10 @@ options =
            "rerun verification of current module\n(ignore results of previous verification)"
   , Option "s" ["statistics"]
            (NoArg (\opts -> opts { optStats = True }))
-           "show statistics (functions, failures,...)"
+           "show and store statistics (functions, failures,...)"
   , Option "t" ["time"]
            (NoArg (\opts -> opts { optTime = True }))
            "show total verification time for each module"
-  , Option "w" ["write"]
-           (NoArg (\opts -> opts { optWrite = True }))
-           "write  a '..._CALLTYPES' module with required\ncall types or statistic files"
   ]
  where
   safeReadNat opttrans s opts = case readNat s of

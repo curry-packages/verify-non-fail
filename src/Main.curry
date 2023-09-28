@@ -135,19 +135,18 @@ verifyModule astore opts mname = do
        return (numits, tdiff, st)
      else return (0, 0, vstate)
   -- print statistics:
-  let newcalltypes      = vstCallTypes vst
-      newntcalltypes    = filter (not . isTotalCallType . snd) newcalltypes
-      newpubntcalltypes = filter ((`elem` visfuncs) . fst) newntcalltypes
-  let (stattxt,statcsv) = showStatistics vtime vnumits (optVerify opts)
-                            (length visfuncs, length fdecls)
+  let finalcalltypes    = vstCallTypes vst
+      finalntcalltypes  = filter (not . isTotalCallType . snd) finalcalltypes
+      (stattxt,statcsv) = showStatistics opts vtime vnumits visfuncs
+                            (length fdecls)
                             (length pubntiotypes, length ntiotypes)
                             (length pubcalltypes, length ntcalltypes)
-                            (newpubntcalltypes, newntcalltypes)
-                            (vstStats vst)
+                            finalntcalltypes (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
+    let newpubntcalltypes = filter ((`elem` visfuncs) . fst) finalntcalltypes
     storeTypes opts mname (allConsOfTypes (progTypes flatprog))
-               newpubntcalltypes newcalltypes iotypes
+               newpubntcalltypes finalcalltypes iotypes
     storeStatistics opts mname stattxt statcsv
 
 -- Try to verify a module, possibly in several iterations.
@@ -245,7 +244,7 @@ loadAnalysisWithImports anastore analysis opts prog = do
           (lookup mname minfos)
 
 -- Transform the result value information from CASS into a mapping w.r.t.
--- into local `AType` values.
+-- local `AType` values.
 cass2AType :: ProgInfo AType -> (QName -> AType)
 cass2AType resvalinfo qf =
   maybe (error $ "Result values information of " ++ snd qf ++ " not found!")

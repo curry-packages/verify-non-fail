@@ -112,7 +112,7 @@ callTypesModule :: String -> String
 callTypesModule mname = mname ++ "_CALLTYPES"
 
 ------------------------------------------------------------------------------
--- Stores non-trivial call types and non-trivial input/output types.
+-- Stores call types and input/output types for a module.
 storeTypes :: Options -> String -> [[(QName,Int)]]
            -> [(QName,[[CallType]])] -- public non-trivial call types
            -> [(QName,[[CallType]])] -- all call types
@@ -130,12 +130,13 @@ storeTypes opts mname allcons pubntcalltypes calltypes iotypes = do
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod calltypes)))
   writeFile iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
-  writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
+  when (optModule opts) $
+    writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
  where
   filterMod xs = filter (\ ((mn,_),_) -> mn == mname) xs
 
--- Try to read constructors, non-trivial call types, and
--- non-trivial input/output types for a given module.
+-- Try to read constructors, call types, and
+-- input/output types for a given module.
 -- If the data files do not exist or are older than the source of the
 -- module, `Nothing` is returned.
 tryReadTypes :: Options -> String
@@ -160,8 +161,7 @@ tryReadTypes opts mname = do
         then fmap Just (readTypes opts mname)
         else return Nothing
 
--- Reads constructors, non-trivial call types, and
--- non-trivial input/output types for a given module.
+-- Reads constructors, call types, and input/output types for a given module.
 readTypes :: Options -> String
           -> IO ([[(QName,Int)]], [(QName,[[CallType]])], [(QName,InOutType)])
 readTypes _ mname = do
@@ -175,8 +175,8 @@ readTypes _ mname = do
           map (\ (fn,ct) -> ((mname,fn), ct)) cts,
           map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots)
 
---- Reads constructors, non-trivial call types, and
---- non-trivial input/output types for a given list of modules.
+--- Reads constructors, call types, and input/output types
+--- for a given list of modules.
 --- If some of the data files do not exists or are not newer
 --- than the module source, the operation provided as the second argument
 --- is applied before reading the files.
@@ -217,7 +217,6 @@ readCallTypeFile opts mtimesrc mname = do
         else return Nothing
     else return Nothing
 
-------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
 --- Reads the public non-trivial call types (which have been already
 --- computed or explicitly specified) for a given module which are
@@ -343,7 +342,7 @@ writeCallTypeSpecMod opts mname pubntcalltypes = do
     else do
       oldctmod <- if exct then readCompleteFile ctfile else return ""
       let ctmod = showCProg (callTypes2SpecMod mname pubntcalltypes) ++ "\n"
-      unless (oldctmod == ctmod || not (optWrite opts)) $ do
+      unless (oldctmod == ctmod || not (optModule opts)) $ do
         writeFile ctfile ctmod
         includepath <- fmap (</> "include") getPackagePath
         printWhenStatus opts $

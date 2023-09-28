@@ -10,6 +10,7 @@ module Verify.Statistics ( showStatistics, storeStatistics )
 
 import Control.Monad        ( when )
 
+import AbstractCurry.Types  ( QName )
 import Text.CSV
 
 import Verify.CallTypes
@@ -25,13 +26,13 @@ statsFile :: String -> String
 statsFile mname = mname ++ "-STATISTICS"
 
 -- Show statistics in textual and in CSV format:
-showStatistics :: Int -> Int -> Bool -> (Int,Int) -> (Int,Int) -> (Int,Int)
-               -> ([(QName,[[CallType]])], [(QName,[[CallType]])])
+showStatistics :: Options -> Int -> Int -> [QName] -> Int -> (Int,Int)
+               -> (Int,Int) -> [(QName,[[CallType]])]
                -> (Int,Int) -> (String, [String])
-showStatistics vtime numits withverify (numvisfuncs, numallfuncs)
+showStatistics opts vtime numits visfuncs numallfuncs
                (numpubiotypes, numalliotypes)
                (numpubcalltypes, numallcalltypes)
-               (ntfinalpubcts, ntfinalcts) (numcalls, numcases) =
+               ntfinalcts (numcalls, numcases) =
   ( unlines $
       [ "Functions                      (public / all): " ++
         show numvisfuncs ++ " / " ++ show numallfuncs
@@ -39,7 +40,7 @@ showStatistics vtime numits withverify (numvisfuncs, numallfuncs)
         show numpubiotypes ++ " / " ++ show numalliotypes
       , "Initial non-trivial call types (public / all): " ++
         show numpubcalltypes ++ " / " ++ show numallcalltypes ] ++
-      (if withverify
+      (if optVerify opts
          then [ "Final non-trivial call types   (public / all): " ++
                 show numntfinalpubcts ++ " / " ++ show numntfinalcts
               , "Final failing call types       (public / all): " ++
@@ -60,6 +61,8 @@ showStatistics vtime numits withverify (numvisfuncs, numallfuncs)
              , numcalls, numcases, numits, vtime ]
   )
  where
+  numvisfuncs      = length visfuncs
+  ntfinalpubcts    = filter ((`elem` visfuncs) . fst) ntfinalcts
   numntfinalpubcts = length ntfinalpubcts
   numntfinalcts    = length ntfinalcts
   numfailpubcts    = length (filter (isFailCallType . snd) ntfinalpubcts)
@@ -68,8 +71,7 @@ showStatistics vtime numits withverify (numvisfuncs, numallfuncs)
 --- Store the statitics for a module in a text and a CSV file
 --- (if required by the current options).
 storeStatistics :: Options -> String -> String -> [String] -> IO ()
-storeStatistics opts mname stattxt statcsv =
-  when (optStats opts && optWrite opts) $ do
+storeStatistics opts mname stattxt statcsv = when (optStats opts) $ do
     writeFile    (statsFile mname ++ ".txt") stattxt
     writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
 
