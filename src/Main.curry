@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version September 2023
+--- @version October 2023
 -------------------------------------------------------------------------
 
 module Main where
@@ -49,7 +49,7 @@ import Verify.Statistics
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 28/09/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 12/10/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -70,11 +70,12 @@ verifyModule astore opts mname = do
   flatprog <- readFlatCurry mname >>= return . transformChoiceInProg
   let fdecls   = progFuncs flatprog
       visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
-  whenStatus opts $ putStr $
-    "Reading abstract types of imports: " ++ unwords (progImports flatprog)
   imps@(impconss,impcalltypes,impiotypes) <-
-    if optVerify opts
-      then readTypesOfModules opts (verifyModule astore) (progImports flatprog)
+    if optImports opts
+      then do
+        whenStatus opts $ putStr $
+          "Reading abstract types of imports: " ++ unwords (progImports flatprog)
+        readTypesOfModules opts (verifyModule astore) (progImports flatprog)
       else return ([],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
@@ -90,8 +91,8 @@ verifyModule astore opts mname = do
       ntcalltypes  = filter (not . isTotalCallType . snd) calltypes
       pubcalltypes = filter ((`elem` visfuncs) . fst) ntcalltypes
   if optVerb opts > 2
-    then do putStrLn $ unlines $ "CALL TYPES OF ALL OPERATIONS:" :
-                       showFunResults prettyFunCallTypes calltypes
+    then putStrLn $ unlines $ "CALL TYPES OF ALL OPERATIONS:" :
+           showFunResults prettyFunCallTypes calltypes
     else when (optVerb opts > 1 || optCallTypes opts) $
       putStrLn $ unlines $
         ("NON-TRIVIAL CALL TYPES OF " ++
