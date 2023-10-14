@@ -17,10 +17,6 @@ import System.Environment         ( getArgs )
 import Debug.Trace ( trace )
 
 -- Imports from dependencies:
-import Analysis.ProgInfo
-import Analysis.Types
-import Analysis.Values            ( resultValueAnalysis )
-import CASS.Server                ( analyzeGeneric, analyzePublic )
 import Control.Monad.Trans.Class  ( lift )
 import Control.Monad.Trans.State  ( StateT, get, put, execStateT )
 import Data.IORef
@@ -115,8 +111,8 @@ verifyModule astore opts mname = do
           (sortFunResults $ if optPublic opts then pubacalltypes
                                               else ntacalltypes)
 
-  rvinfo <- loadAnalysisWithImports astore resultValueAnalysis opts flatprog
-  let iotypes      = map (inOutATypeFunc (cass2AType rvinfo)) fdecls
+  rvmap <- analyzeResultValues astore opts flatprog
+  let iotypes      = map (inOutATypeFunc rvmap) fdecls
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
       pubntiotypes = filter ((`elem` visfuncs) . fst) ntiotypes
   if optVerb opts > 2
@@ -239,36 +235,6 @@ showIncompleteBranch qf e cs@(_:_) =
 showIncompleteBranch qf e [] =
   "Function '" ++ snd qf ++ "': the case on literals might be incomplete:\n" ++
   showExp e
-
-------------------------------------------------------------------------------
--- Store for the analysis information of CASS. Used to avoid multiple reads.
-data AnalysisStore a = AnaStore [(String, ProgInfo a)]
-
--- Loads CASS analysis results for a module and its imported entities.
-loadAnalysisWithImports :: (Read a, Show a) =>
-   IORef (AnalysisStore a) -> Analysis a -> Options -> Prog -> IO (ProgInfo a)
-loadAnalysisWithImports anastore analysis opts prog = do
-  maininfo <- getOrAnalyze (progName prog)
-  impinfos <- mapM getOrAnalyze (progImports prog)
-  return $ foldr combineProgInfo maininfo (map publicProgInfo impinfos)
- where
-  getOrAnalyze mname = do
-    AnaStore minfos <- readIORef anastore
-    maybe (do printWhenStatus opts $ "Getting " ++ analysisName analysis ++
-                " for '" ++ mname ++ "' via CASS..."
-              minfo <- fmap (either id error) $ analyzeGeneric analysis mname
-              writeIORef anastore (AnaStore ((mname,minfo) : minfos))
-              return minfo)
-          return
-          (lookup mname minfos)
-
--- Transform the result value information from CASS into a mapping w.r.t.
--- local `AType` values.
-cass2AType :: ProgInfo AType -> (QName -> AType)
-cass2AType resvalinfo qf =
-  maybe (error $ "Result values information of " ++ snd qf ++ " not found!")
-        id
-        (lookupProgInfo qf resvalinfo)
 
 ------------------------------------------------------------------------------
 -- The state of the transformation process contains
@@ -700,7 +666,7 @@ verifyMissingBranches :: Expr -> Int -> [BranchExpr] -> VerifyStateM ()
 verifyMissingBranches _ _ [] = do
   currfn <- getCurrentFuncName
   error $ "Function " ++ snd currfn ++ " contains case with empty branches!"
-verifyMissingBranches exp casevar (Branch (Pattern qc vs) _ : bs) = do
+verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   allcons <- getAllCons -- >>= return . map (map fst)
   let otherqs  = map ((\p -> (patCons p, length(patArgs p))) . branchPattern) bs
       siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
