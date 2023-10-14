@@ -94,11 +94,11 @@ pre :: String -> QName
 pre f = ("Prelude",f)
 
 --- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
-getSiblingsOf :: [[QName]] -> QName -> Maybe [QName]
+getSiblingsOf :: [[(QName,Int)]] -> QName -> Maybe [(QName,Int)]
 getSiblingsOf allcons qc =
   maybe Nothing
-        (\qcs -> Just $ delete qc qcs)
-        (find (qc `elem`) allcons)
+        (\qcs -> Just $ deleteBy (\x y -> fst x == fst y) (qc,0) qcs)
+        (find ((qc `elem`) . map fst) allcons)
 
 --- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
 arityOfCons :: [[(QName,Int)]] -> QName -> Int

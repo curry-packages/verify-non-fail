@@ -9,12 +9,11 @@ module Verify.CallTypes where
 
 import Data.List
 
-import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons
-                       , joinAType, lubAType, showAType )
 import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Types
 
+import Verify.Domain
 import Verify.Helpers
 import Verify.Options
 
@@ -62,7 +61,7 @@ prettyCallTypeArgs cts = case cts of
 
 --- Simplify call types by recursively transforming each complete
 --- list of constructors with `AnyT` arguments to `AnyT`.
-simpFuncCallType :: [[QName]] -> [[CallType]] -> [[CallType]]
+simpFuncCallType :: [[(QName,Int)]] -> [[CallType]] -> [[CallType]]
 simpFuncCallType allcons ctss =
   let ctss' = foldr addCTArgs [] (map (map simpCallType) ctss)
   in if ctss' == ctss then ctss
@@ -76,7 +75,7 @@ simpFuncCallType allcons ctss =
     complete2Any (c:cs)
       | all (== AnyT) (concatMap snd (c:cs)) && -- all arguments AnyT?
         maybe False
-              (\qcs -> all (`elem` map fst cs) qcs)
+              (\qcs -> all (`elem` map fst cs) (map fst qcs))
               (getSiblingsOf allcons (fst c))
       = AnyT
       | otherwise = MCons (c:cs)
@@ -189,7 +188,7 @@ initCallTypeState opts qf vs =
 --- (represented as a list) of alternative call types
 --- where each element in the disjunction is list of `n` call types for
 --- each argument.
-callTypeFunc :: Options -> [[QName]] -> FuncDecl -> (QName,[[CallType]])
+callTypeFunc :: Options -> [[(QName,Int)]] -> FuncDecl -> (QName,[[CallType]])
 callTypeFunc opts allcons (Func qf ar _ _ rule) =
   maybe
     (case rule of
@@ -269,7 +268,7 @@ callTypeExpr ctst exp = case exp of
                               , ctstVarPos = ctstVarPos ctst ++
                                              map (\ (vi,i) -> (vi, vpos ++ [i]))
                                                  (zip vs [0..]) }
-        LPattern lit  -> ctst { ctstCallType = addCons2CT (lit2cons lit) 0 vpos
+        LPattern lit  -> ctst { ctstCallType = addCons2CT (litAsCons lit) 0 vpos
                                                           (ctstCallType ctst) }
    where vpos = maybe (varNotFound v) id (lookup v (ctstVarPos ctst))
 
@@ -301,12 +300,8 @@ funcCallType2AType (qn,fct) =
   callType2AType AnyT = anyType
   callType2AType (MCons cs) =
     foldr lubAType emptyType
-          (map (\(qc,cts) -> 
-                if all (== anyType) (map callType2AType cts)
-                  then aCons qc --TODO: generalize for other domains
-                  else emptyType)
-         cs)
-  
+          (map (\(qc,cts) -> aCons qc (map callType2AType cts)) cs)
+
 
 -- Describes an abstract call type a totally reducible operation?
 isTotalACallType :: ACallType -> Bool

@@ -19,8 +19,7 @@ import Debug.Trace ( trace )
 -- Imports from dependencies:
 import Analysis.ProgInfo
 import Analysis.Types
-import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons, joinAType
-                       , lubAType, showAType, resultValueAnalysis )
+import Analysis.Values            ( resultValueAnalysis )
 import CASS.Server                ( analyzeGeneric, analyzePublic )
 import Control.Monad.Trans.Class  ( lift )
 import Control.Monad.Trans.State  ( StateT, get, put, execStateT )
@@ -39,6 +38,7 @@ import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
 
 -- Imports from package modules:
 import Verify.CallTypes
+import Verify.Domain
 import Verify.Files
 import Verify.Helpers
 import Verify.IOTypes
@@ -80,9 +80,8 @@ verifyModule astore opts mname = do
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
                   else printWhenStatus opts ""
-  let allconsar = allConsOfTypes (progTypes flatprog) ++ impconss
-      allcons   = map (map fst) allconsar
-  oldpubcalltypes <- readPublicCallTypeModule opts allconsar mtime mname
+  let allcons = allConsOfTypes (progTypes flatprog) ++ impconss
+  oldpubcalltypes <- readPublicCallTypeModule opts allcons mtime mname
   let calltypes    = unionBy (\x y -> fst x == fst y) oldpubcalltypes
                              (map (callTypeFunc opts allcons) fdecls)
       ntcalltypes  = filter (not . isTotalCallType . snd) calltypes
@@ -130,7 +129,7 @@ verifyModule astore opts mname = do
         showFunResults showIOT
           (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
 
-  let vstate = initVerifyState fdecls allconsar impacalltypes acalltypes
+  let vstate = initVerifyState fdecls allcons impacalltypes acalltypes
                                (iotypes ++ impiotypes) opts
       funusage = funcDecls2Usage mname (progFuncs flatprog)
   printWhenAll opts $ unlines $
@@ -527,7 +526,8 @@ verifyFunc (Func qf ar _ _ rule) = case rule of
 -- cannot be ensured by the current tool.
 noVerifyFunctions :: [QName]
 noVerifyFunctions =
-  [pre "aValueChar"]
+  [ pre "aValueChar" -- is non-failing if minBound <= maxBound, which is True
+  ]
 
 verifyFuncRule :: [Int] -> Expr -> VerifyStateM ()
 verifyFuncRule vs exp = do
@@ -601,7 +601,7 @@ verifyVarExpr ve exp = case exp of
                        -- TODO: improve by handling equality constraint v==ve
                        -- instead of copying the current types for v to ve:
                        return $ map (\ (_,iots,vs) -> (ve,iots,vs)) vtypes
-  Lit l         -> return [(ve, IOT [([], aCons (lit2cons l))], [])]
+  Lit l         -> return [(ve, IOT [([], aLit l)], [])]
   Comb ct qf es -> do
     vs <- if isEncSearchOp qf
             then -- for encapsulated search, failures in arguments are hidden
@@ -614,7 +614,7 @@ verifyVarExpr ve exp = case exp of
     case ct of
       FuncCall -> do opts <- getToolOptions
                      verifyFuncCall (optError opts) exp qf vs
-                     ftype <- getFuncType qf (length es)
+                     ftype <- getFuncType qf (length vs)
                      return [(ve, ftype, vs)]
       FuncPartCall n -> -- note: also partial calls are considered as constr.
                   do ctype <- getCallType qf (n + length es)
@@ -652,7 +652,8 @@ verifyVarExpr ve exp = case exp of
 
   -- create input/output type for a constructor (improve by type info?)
   consIOType qc vs rv =
-    (rv, IOT [(take (length vs) (repeat anyType), aCons qc)], vs)
+    let anys = anyTypes (length vs)
+    in (rv, IOT [(anys, aCons qc anys)], vs)
 
 -- Verify the nonfailing type of a function
 verifyFuncCall :: Bool -> Expr -> QName -> [Int] -> VerifyStateM ()
@@ -699,9 +700,9 @@ verifyMissingBranches :: Expr -> Int -> [BranchExpr] -> VerifyStateM ()
 verifyMissingBranches _ _ [] = do
   currfn <- getCurrentFuncName
   error $ "Function " ++ snd currfn ++ " contains case with empty branches!"
-verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
-  allcons <- getAllCons >>= return . map (map fst)
-  let otherqs   = map (patCons . branchPattern) bs
+verifyMissingBranches exp casevar (Branch (Pattern qc vs) _ : bs) = do
+  allcons <- getAllCons -- >>= return . map (map fst)
+  let otherqs  = map ((\p -> (patCons p, length(patArgs p))) . branchPattern) bs
       siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
                        id
                        (getSiblingsOf allcons qc)
@@ -710,8 +711,10 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   unless (null missingcs) $ do
     incrIncompleteCases
     cvtype <- getVarTypes >>= return . getVarType casevar
-    let posscs = filter (\c -> joinAType cvtype (aCons c) /= emptyType)
-                        missingcs
+    let posscs = map fst
+                     (filter (\(c,ar) -> let ctype = aCons c (anyTypes ar)
+                                         in joinAType cvtype ctype /= emptyType)
+                             missingcs)
     unless (null posscs) $ do
       printIfVerb 2 $ showIncompleteBranch currfn exp posscs ++ "\n"
       showVarExpTypes
@@ -721,8 +724,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
   currfn <- getCurrentFuncName
   let lits = lit : map (patLiteral . branchPattern) bs
   cvtype <- getVarTypes >>= return . getVarType casevar
-  unless (isSubtypeOf cvtype
-            (foldr1 lubAType (map (\l -> aCons (lit2cons l)) lits))) $ do
+  unless (isSubtypeOf cvtype (foldr1 lubAType (map aLit lits))) $ do
     printIfVerb 2 $ showIncompleteBranch currfn exp [] ++ "\n"
     showVarExpTypes
     addMissingCase exp []
@@ -734,7 +736,7 @@ verifyBranch :: Int -> Int -> BranchExpr
              -> VerifyStateM  [(Int, InOutType, [Int])]
 verifyBranch casevar ve (Branch (LPattern l)    e) = do
   vts <- getVarTypes
-  let branchvartypes = bindVarInIOTypes casevar (lit2cons l) vts
+  let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
   if getVarType casevar branchvartypes == emptyType
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
@@ -744,7 +746,8 @@ verifyBranch casevar ve (Branch (LPattern l)    e) = do
 verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   addVarExps (map (\v -> (v, Var v)) vs)
   vts <- getVarTypes
-  let branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar qc vts)
+  let vartype = aCons qc (anyTypes (length vs))
+      branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar vartype vts)
   if getVarType casevar branchvartypes == emptyType
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes

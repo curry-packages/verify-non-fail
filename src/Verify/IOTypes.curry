@@ -14,12 +14,12 @@ module Verify.IOTypes
 
 import Data.List
 import Data.Maybe      ( mapMaybe )
-import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons
-                       , joinAType, lubAType, showAType )
+
 import FlatCurry.Types
 
 import Debug.Trace ( trace )
 
+import Verify.Domain
 import Verify.Helpers
 
 ------------------------------------------------------------------------------
@@ -103,10 +103,11 @@ inOutATypeExpr tst exp = case exp of
   Var v         -> maybe (varNotFound v)
                          (\ (_,ct) -> IOT [(ccAType tst, ct)])
                          (lookup v (varPosAType tst))
-  Lit l         -> IOT [(ccAType tst, aCons (lit2cons l))]
-  Comb ct qf _  -> if ct == FuncCall
+  Lit l         -> IOT [(ccAType tst, aLit l)]
+  Comb ct qf es -> if ct == FuncCall
                      then IOT [(ccAType tst, resValue tst qf)]
-                     else IOT [(ccAType tst, aCons qf)]
+                     else IOT [(ccAType tst, aCons qf (anyTypes (length es)))]
+                            -- TODO: improve precision for non-depth-1 domains
   Let vs e      -> inOutATypeExpr (addNewAVars (map fst vs) tst) e
                     -- TODO: make let analysis more precise
   Free vs e     -> inOutATypeExpr (addNewAVars vs tst) e
@@ -135,19 +136,20 @@ inOutATypeExpr tst exp = case exp of
     = case pat of Pattern _ vs -> addNewAVars vs tst'
                   LPattern _   -> tst'
    where
-    consOfPat = case pat of Pattern qc _ -> qc
-                            LPattern l   -> lit2cons l
-    tst' = (setVarType v (aCons consOfPat) tst)
-             { ccAType = setACons2CT consOfPat vpos (ccAType tst) }
+    aconsOfPat = case pat of Pattern qc vs -> aCons qc (anyTypes (length vs))
+                             LPattern l    -> aLit l
+    tst' = (setVarType v aconsOfPat tst)
+             { ccAType = setACons2CT aconsOfPat vpos (ccAType tst) }
     vpos = maybe (varNotFound v) fst (lookup v (varPosAType tst))
 
   addBranchPattern (Pattern _ vs) = addNewAVars vs tst
   addBranchPattern (LPattern _)   = tst
 
-  -- Sets a constructor for a position in a given list of argument types.
-  setACons2CT :: QName -> Pos -> [AType] -> [AType]
+  -- Sets an (abstract) constructor type for a position in a given list
+  -- of argument types.
+  setACons2CT :: AType -> Pos -> [AType] -> [AType]
   setACons2CT _  []  ats = trace "setACons2CT: root occurrence" ats
-  setACons2CT qc [p] ats = replace (joinAType (aCons qc) (ats!!p)) p ats
+  setACons2CT qt [p] ats = replace (joinAType qt (ats!!p)) p ats
   setACons2CT _  ps@(_:_:_) ats =
     trace ("setACons2CT: deep position occurred: " ++ show ps) ats
 
@@ -235,16 +237,16 @@ simplifyVarTypes = simpDefVarTypes []
     | otherwise
     = (v1, IOT iots, vs1)
 
---- Adds the binding of a variable to a constructor to the set of
---- input/output types for variables.
-bindVarInIOTypes :: Int -> QName -> [VarType] -> [VarType]
-bindVarInIOTypes var qc = map bindVar
+--- Adds the binding of a variable to an abstract type (the representation
+--- of a constructor) to the set of input/output types for variables.
+bindVarInIOTypes :: Int -> AType -> [VarType] -> [VarType]
+bindVarInIOTypes var vatype = map bindVar
  where
   bindVar (v, IOT iots, vs)
     | var /= v  = (v, IOT iots, vs)
     | otherwise
     = (v, IOT (filter ((/= emptyType) . snd) -- remove empty alternative types
-                 (map (\ (ats,rt) -> (ats, joinAType rt (aCons qc)))
+                 (map (\ (ats,rt) -> (ats, joinAType rt vatype))
                       iots)), vs)
 
 ------------------------------------------------------------------------------
