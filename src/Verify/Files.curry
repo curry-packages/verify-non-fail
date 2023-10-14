@@ -7,7 +7,7 @@
 --- is usually `~/.curry_verifycache/...`.
 ---
 --- @author Michael Hanus
---- @version September 2023
+--- @version October 2023
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -95,7 +95,7 @@ getRealPath path = do
  where
   stripSpaces = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
--- Gets the name of the file containing all call types of a module.
+-- Gets the name of the file containing all abstract call types of a module.
 getCallTypesFile :: String -> IO String
 getCallTypesFile mname = getVerifyCacheBaseFile mname "CALLTYPES"
 
@@ -114,24 +114,23 @@ callTypesModule mname = mname ++ "_CALLTYPES"
 ------------------------------------------------------------------------------
 -- Stores call types and input/output types for a module.
 storeTypes :: Options -> String -> [[(QName,Int)]]
-           -> [(QName,[[CallType]])] -- public non-trivial call types
-           -> [(QName,[[CallType]])] -- all call types
-           -> [(QName,InOutType)]    -- all input output types
+           -> [(QName,ACallType)]  -- all inferred abstract call types
+           -> [(QName,InOutType)]  -- all input output types
            -> IO ()
-storeTypes opts mname allcons pubntcalltypes calltypes iotypes = do
+storeTypes opts mname allcons acalltypes iotypes = do
   patfile <- getVerifyCacheBaseFile mname "..."
   printWhenAll opts $ "Storing analysis results at '" ++ patfile ++ "'"
   createDirectoryIfMissing True (dropFileName patfile)
-  csfile <- getConsTypesFile mname
+  csfile  <- getConsTypesFile  mname
   ctfile <- getCallTypesFile mname
-  iofile <- getIOTypesFile   mname
+  iofile  <- getIOTypesFile    mname
   writeFile csfile (show allcons)
   writeFile ctfile
-    (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod calltypes)))
+    (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
   writeFile iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
-  when (optModule opts) $
-    writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
+  --when (optModule opts) $
+  --  writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
  where
   filterMod xs = filter (\ ((mn,_),_) -> mn == mname) xs
 
@@ -140,11 +139,11 @@ storeTypes opts mname allcons pubntcalltypes calltypes iotypes = do
 -- If the data files do not exist or are older than the source of the
 -- module, `Nothing` is returned.
 tryReadTypes :: Options -> String
-  -> IO (Maybe ([[(QName,Int)]], [(QName,[[CallType]])], [(QName,InOutType)]))
+  -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType)], [(QName,InOutType)]))
 tryReadTypes opts mname = do
-  csfile <- getConsTypesFile mname
-  ctfile <- getCallTypesFile mname
-  iofile <- getIOTypesFile   mname
+  csfile   <- getConsTypesFile mname
+  ctfile   <- getCallTypesFile mname
+  iofile   <- getIOTypesFile   mname
   csexists <- doesFileExist csfile
   ctexists <- doesFileExist ctfile
   ioexists <- doesFileExist iofile
@@ -155,18 +154,19 @@ tryReadTypes opts mname = do
       cstime  <- getModificationTime csfile
       cttime  <- getModificationTime ctfile
       iotime  <- getModificationTime iofile
-      if compareClockTime cstime srctime == GT &&
+      if compareClockTime cstime  srctime == GT &&
          compareClockTime cttime srctime == GT &&
-         compareClockTime iotime srctime == GT
+         compareClockTime iotime  srctime == GT
         then fmap Just (readTypes opts mname)
         else return Nothing
 
--- Reads constructors, call types, and input/output types for a given module.
+-- Reads constructors, abstract call types, and input/output types
+-- for a given module.
 readTypes :: Options -> String
-          -> IO ([[(QName,Int)]], [(QName,[[CallType]])], [(QName,InOutType)])
+          -> IO ([[(QName,Int)]], [(QName,ACallType)], [(QName,InOutType)])
 readTypes _ mname = do
   csfile <- getConsTypesFile mname
-  ctfile <- getCallTypesFile mname
+  ctfile <- getCallTypesFile  mname
   iofile <- getIOTypesFile   mname
   conss  <- readFile csfile >>= return . read
   cts    <- readFile ctfile >>= return . map read . lines
@@ -181,7 +181,7 @@ readTypes _ mname = do
 --- than the module source, the operation provided as the second argument
 --- is applied before reading the files.
 readTypesOfModules :: Options -> (Options -> String -> IO ()) -> [String]
-  -> IO ([[(QName,Int)]], [(QName,[[CallType]])], [(QName,InOutType)])
+  -> IO ([[(QName,Int)]], [(QName,ACallType)], [(QName,InOutType)])
 readTypesOfModules opts computetypes mnames = do
   (xs,ys,zs) <- mapM tryRead mnames >>= return . unzip3
   return (concat xs, concat ys, concat zs)
@@ -197,11 +197,11 @@ readTypesOfModules opts computetypes mnames = do
                       return)
           return
 
---- Reads the possibly previously inferred call types for a given module
---- if it is up-to-date (where the modification time of the module
---- is passed as the second argument).
+--- Reads the possibly previously inferred abstract call types for a
+--- given module if it is up-to-date (where the modification time
+--- of the module is passed as the second argument).
 readCallTypeFile :: Options -> ClockTime -> String
-                 -> IO (Maybe [(QName,[[CallType]])])
+                 -> IO (Maybe [(QName,ACallType)])
 readCallTypeFile opts mtimesrc mname = do
   fname <- getCallTypesFile mname
   existsf <- doesFileExist fname
@@ -211,7 +211,8 @@ readCallTypeFile opts mtimesrc mname = do
       if compareClockTime mtimectf mtimesrc == GT
         then do
           printWhenStatus opts $
-            "Reading previously inferred call types from '" ++ fname ++ "'..."
+            "Reading previously inferred abstract call types from '" ++
+            fname ++ "'..."
           cts <- readFile fname >>= return . map read . lines
           return $ Just (map (\ (fn,ct) -> ((mname,fn), ct)) cts)
         else return Nothing

@@ -2,7 +2,7 @@
 --- Operations to show and store statistical information about the analysis.
 ---
 --- @author Michael Hanus
---- @version September 2023
+--- @version October 2023
 -----------------------------------------------------------------------------
 
 module Verify.Statistics ( showStatistics, storeStatistics )
@@ -27,7 +27,7 @@ statsFile mname = mname ++ "-STATISTICS"
 
 -- Show statistics in textual and in CSV format:
 showStatistics :: Options -> Int -> Int -> [QName] -> Int -> (Int,Int)
-               -> (Int,Int) -> [(QName,[[CallType]])]
+               -> (Int,Int) -> [(QName,ACallType)]
                -> (Int,Int) -> (String, [String])
 showStatistics opts vtime numits visfuncs numallfuncs
                (numpubiotypes, numalliotypes)
@@ -65,8 +65,8 @@ showStatistics opts vtime numits visfuncs numallfuncs
   ntfinalpubcts    = filter ((`elem` visfuncs) . fst) ntfinalcts
   numntfinalpubcts = length ntfinalpubcts
   numntfinalcts    = length ntfinalcts
-  numfailpubcts    = length (filter (isFailCallType . snd) ntfinalpubcts)
-  numfailcts       = length (filter (isFailCallType . snd) ntfinalcts)
+  numfailpubcts    = length (filter (isFailACallType . snd) ntfinalpubcts)
+  numfailcts       = length (filter (isFailACallType . snd) ntfinalcts)
 
 --- Store the statitics for a module in a text and a CSV file
 --- (if required by the current options).

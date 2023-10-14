@@ -3,7 +3,7 @@
 --- related operations.
 ---
 --- @author Michael Hanus
---- @version September 2023
+--- @version October 2023
 -------------------------------------------------------------------------
 
 module Verify.Options
@@ -91,9 +91,9 @@ options =
   , Option "i" ["iotypes"]
             (NoArg (\opts -> opts { optIOTypes = True }))
            "show input/output types"
-  , Option "m" ["module"]
-           (NoArg (\opts -> opts { optModule = True }))
-           "write  a '..._CALLTYPES' module with required\ncall types"
+  --, Option "m" ["module"]
+  --         (NoArg (\opts -> opts { optModule = True }))
+  --         "write  a '..._CALLTYPES' module with required\ncall types"
   , Option "" ["noimports"]
            (NoArg (\opts -> opts { optImports = False }))
            "do not read/analyze imported modules (for testing)"

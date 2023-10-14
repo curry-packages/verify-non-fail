@@ -2,7 +2,7 @@
 --- The definition of call types and an operation to infer them.
 ---
 --- @author Michael Hanus
---- @version September 2023
+--- @version October 2023
 ------------------------------------------------------------------------------
 
 module Verify.CallTypes where
@@ -10,7 +10,7 @@ module Verify.CallTypes where
 import Data.List
 
 import Analysis.Values ( AType, emptyType, anyType, aCons, lit2cons
-                       , joinAType, lubAType, caseAType )
+                       , joinAType, lubAType, showAType )
 import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Types
@@ -30,8 +30,7 @@ import Verify.Options
 data CallType = AnyT | MCons [(QName,[CallType])]
  deriving (Eq,Read,Show)
 
---- The call type of an operation which has no non-failing arguments
---- expressible by call types for the arguments.
+--- The call type of an operation which has no non-failing arguments.
 failCallType :: [[CallType]]
 failCallType = []
 
@@ -186,6 +185,10 @@ initCallTypeState opts qf vs =
 
 --- Computes the call type of a function where all constructors are
 --- provided as the second argument.
+--- The computed call type for an `n`-ary function is a disjunction
+--- (represented as a list) of alternative call types
+--- where each element in the disjunction is list of `n` call types for
+--- each argument.
 callTypeFunc :: Options -> [[QName]] -> FuncDecl -> (QName,[[CallType]])
 callTypeFunc opts allcons (Func qf ar _ _ rule) =
   maybe
@@ -212,6 +215,7 @@ defaultCallTypes =
       ] ++
   [ (pre "&",   [[MCons [(pre "True",[])], MCons [(pre "True",[])]]])
   , (pre "cond",[[MCons [(pre "True",[])], AnyT]])
+  , (pre "aValueChar",[[]])
   ]
 
 --- Computes the call type of an external (primitive) function.
@@ -273,82 +277,94 @@ callTypeExpr ctst exp = case exp of
   addBranchPattern (LPattern _)   = ctst
 
 ------------------------------------------------------------------------------
+-- An abstract call type of an operation is either `Nothing` in case of
+-- an always failing operation, or just a list of abstract types for
+-- the arguments.
+-- In the following we provide some operations on abstract call types.
+type ACallType = Maybe [AType]
 
---- Transforms a call type into an abstract type.
-callType2AType :: CallType -> AType
-callType2AType AnyT       = anyType
-callType2AType (MCons qs) = foldr lubAType emptyType
-                                  (map aCons (nub (map fst qs)))
-
---- Transforms an abstract type into a call type.
---- The first argument contains the arities of all constructors.
-aType2CallType :: [[(QName,Int)]] -> AType -> CallType
-aType2CallType allcons =
-  caseAType (MCons . map (\qc ->
-                            (qc, take (arityOfCons allcons qc) (repeat AnyT))))
-            AnyT
-
-------------------------------------------------------------------------------
-
---- Is an (actual) call type a subtype of the required call types?
-subtypeOfSomeAT :: [AType] -> [[CallType]] -> Bool
-subtypeOfSomeAT ct cts = any (subtypesAT ct) cts
- where subtypesAT as bs = all (uncurry subtypeAT) (zip as bs)
-
--- Subtype relation between an abstract type and a call type.
-subtypeAT :: AType -> CallType -> Bool
-subtypeAT _     AnyT        = True
-subtypeAT atype (MCons cts) =
-  caseAType
-    (\qs -> all (\ (_,ats) -> all (==AnyT) ats) cts -- no argument restrictions
-            && all (`elem` map fst cts) qs)
-    False
-    atype
-
-------------------------------------------------------------------------------
-
---- Is it possible to specialize the call types of the variables so that
---- their type is a subtype of the required call type?
-
-makeSubtypeOfSomeAT :: [(Int,AType)] -> [[CallType]] -> Maybe [(Int,AType)]
-makeSubtypeOfSomeAT _  []       = Nothing
-makeSubtypeOfSomeAT ats (argct:argcts) =
-  maybe (makeSubtypeOfSomeAT ats argcts)
-        Just
-        (makeSubtypesOfCTs ats argct)
+--- Transforms a call type for an operation, i.e., a disjunction of a list
+--- of alternative call types for the arguments, into an abstract call type.
+--- Since the abstract call type of an operation is a single list of abstract
+--- call types for the arguments, the disjunctions are joined.
+funcCallType2AType :: (QName, [[CallType]]) -> (QName, ACallType)
+funcCallType2AType (qn,fct) =
+  (qn, if null fct
+         then failACallType
+         else foldr1 joinACallType (map callTypes2ATypes fct))
  where
-  makeSubtypesOfCTs _          []       = Just []
-  makeSubtypesOfCTs (vat:vats) (ct:cts) =
-    maybe Nothing
-          (\nvats1 -> maybe Nothing
-                            (\nvats2 ->
-                               let nvats = joinVarATypes (nvats1 ++ nvats2)
-                               in if any ((==emptyType) . snd) nvats
-                                    then Nothing
-                                    else Just nvats)
-                            (makeSubtypesOfCTs vats cts))
-          (makeSubtypeOfCT vat ct)
-  makeSubtypesOfCTs [] (_:_) = -- should not occur
-    error "Internal error in 'makeSubtypeOfSomeAT': different parameters"
+  callTypes2ATypes cts = let ats = map callType2AType cts
+                         in if any (== emptyType) ats
+                              then Nothing
+                              else Just ats
 
--- Subtype relation between an abstract type and a call type.
-makeSubtypeOfCT :: (Int,AType) -> CallType -> Maybe [(Int,AType)]
-makeSubtypeOfCT _         AnyT        = Just []
-makeSubtypeOfCT (v,atype) (MCons cts) =
-  caseAType
-    (\qs ->
-      if all (\ (_,ats) -> all (==AnyT) ats) cts -- no argument restrictions
-         && all (`elem` map fst cts) qs
-        then Just []
-        else Nothing)
-    (Just [(v, callType2AType (MCons cts))])
-    atype
+  callType2AType AnyT = anyType
+  callType2AType (MCons cs) =
+    foldr lubAType emptyType
+          (map (\(qc,cts) -> 
+                if all (== anyType) (map callType2AType cts)
+                  then aCons qc --TODO: generalize for other domains
+                  else emptyType)
+         cs)
+  
 
---- Join the abstract types for each variable in an abstract type environment.
-joinVarATypes :: [(Int,AType)] -> [(Int,AType)]
-joinVarATypes vats =
-  map (\v -> (v, foldr joinAType anyType
-                       (map snd (filter ((==v) . fst) vats))))
-      (nub (map fst vats))
+-- Describes an abstract call type a totally reducible operation?
+isTotalACallType :: ACallType -> Bool
+isTotalACallType Nothing    = False
+isTotalACallType (Just ats) = all (== anyType) ats
+
+---- The call type of an operation which has no non-failing arguments
+--- expressible by call types for the arguments.
+failACallType :: ACallType
+failACallType = Nothing
+
+--- Is the call type a failure call type?
+isFailACallType :: ACallType -> Bool
+isFailACallType Nothing  = True
+isFailACallType (Just _) = False
+
+-- Pretty print an abstract call type for an operation.
+prettyFunCallAType :: ACallType -> String
+prettyFunCallAType Nothing    = "<FAILING>"
+prettyFunCallAType (Just ats) = case ats of
+  []   -> "()"
+  [at] -> showAType at
+  _    -> "(" ++ intercalate ", " (map showAType ats) ++ ")"
+
+--- Join two abstract call types.
+joinACallType :: ACallType -> ACallType -> ACallType
+joinACallType Nothing     _           = Nothing
+joinACallType (Just _)    Nothing     = Nothing
+joinACallType (Just ats1) (Just ats2) =
+  let ats = map (uncurry joinAType) (zip ats1 ats2)
+  in if any (== emptyType) ats then Nothing
+                               else Just ats
+
+--- Is a list of abstract call types (first argument) a subtype of
+--- the call type of an operation (second argument)?
+subtypeOfRequiredCallType :: [AType] -> ACallType -> Bool
+subtypeOfRequiredCallType _   Nothing     = False
+subtypeOfRequiredCallType ats (Just rats) =
+  all (uncurry isSubtypeOf) (zip ats rats)
+ 
+ --- Is an abstract type `at1` a subtype of another abstract type `at2`?
+ --- Thus, are all values described by `at1` contained in the set of
+ --- values described by `at2`?
+isSubtypeOf :: AType -> AType -> Bool
+isSubtypeOf  at1 at2  = joinAType at1 at2 == at1
+
+------------------------------------------------------------------------------
+
+--- Is it possible to specialize the abstract types of the given
+--- argument variables so that their type is a subtype of the
+--- function call type given in the second argument?
+--- If yes, the specialized argument variable types are returned.
+specializeToRequiredType :: [(Int,AType)] -> ACallType -> Maybe [(Int,AType)]
+specializeToRequiredType _   Nothing    = Nothing
+specializeToRequiredType ats (Just cts) =
+  let newtypes = map (uncurry joinAType) (zip (map snd ats) cts)
+  in if any (== emptyType) newtypes
+       then Nothing
+       else Just (zip (map fst ats) newtypes)
 
 ------------------------------------------------------------------------------
