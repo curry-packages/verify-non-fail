@@ -46,6 +46,10 @@ showIOT (IOT iots) = "{" ++ intercalate " || " (map showIOType iots) ++ "}"
   showIOType (ict,oct) = "(" ++ intercalate "," (map showAType ict) ++ ")" ++
                          " |-> " ++ showAType oct
 
+--- Get all possible result values from an InOutType.
+valuesOfIOT :: InOutType -> AType
+valuesOfIOT (IOT iotypes) = foldr lubAType emptyType (map snd iotypes)
+
 --- Normalize InOutTypes by
 --- * removing alternatives with empty output type
 --- * joining results of IOTypes with identical arguments
@@ -106,8 +110,9 @@ inOutATypeExpr tst exp = case exp of
   Lit l         -> IOT [(ccAType tst, aLit l)]
   Comb ct qf es -> if ct == FuncCall
                      then IOT [(ccAType tst, resValue tst qf)]
-                     else IOT [(ccAType tst, aCons qf (anyTypes (length es)))]
-                            -- TODO: improve precision for non-depth-1 domains
+                     else let argtypes = map (valuesOfIOT . inOutATypeExpr tst)
+                                             es
+                          in IOT [(ccAType tst, aCons qf argtypes)]
   Let vs e      -> inOutATypeExpr (addNewAVars (map fst vs) tst) e
                     -- TODO: make let analysis more precise
   Free vs e     -> inOutATypeExpr (addNewAVars vs tst) e

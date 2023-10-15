@@ -39,6 +39,7 @@ import System.Process       ( system )
 
 import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
+import Verify.Domain        ( domainName )
 import Verify.Helpers
 import Verify.IOTypes
 import Verify.Options
@@ -53,7 +54,7 @@ getVerifyCacheDirectory = do
   homedir    <- getHomeDirectory
   hashomedir <- doesDirectoryExist homedir
   let maindir = if hashomedir then homedir else installDir
-  return $ maindir </> ".curry_verifycache" </>
+  return $ maindir </> ".curry_verifycache" </> domainName </>
            joinPath (tail (splitDirectories currySubdir))
 
 --- Delete the tool's cache directory (for the Curry system).

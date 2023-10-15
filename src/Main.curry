@@ -589,7 +589,7 @@ verifyVarExpr ve exp = case exp of
                          "partial application of non-total function\n"
                        addFailedFunc exp Nothing
                      return [consIOType qf vs ve]
-      _        -> -- note: also partial calls are considered as constr.
+      _        -> -- note: also partial calls are considered as constructors
                   do return [consIOType qf vs ve]
   Let bs e      -> do addVarExps bs
                       mapM_ (addVarAnyType . fst) bs

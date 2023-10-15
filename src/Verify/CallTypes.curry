@@ -285,7 +285,8 @@ type ACallType = Maybe [AType]
 --- Transforms a call type for an operation, i.e., a disjunction of a list
 --- of alternative call types for the arguments, into an abstract call type.
 --- Since the abstract call type of an operation is a single list of abstract
---- call types for the arguments, the disjunctions are joined.
+--- call types for the arguments so that a disjunction of argument lists
+--- cannot be expressed, the disjunctions are joined (i.e., intersected).
 funcCallType2AType :: (QName, [[CallType]]) -> (QName, ACallType)
 funcCallType2AType (qn,fct) =
   (qn, if null fct
@@ -297,7 +298,7 @@ funcCallType2AType (qn,fct) =
                               then Nothing
                               else Just ats
 
-  callType2AType AnyT = anyType
+  callType2AType AnyT       = anyType
   callType2AType (MCons cs) =
     foldr lubAType emptyType
           (map (\(qc,cts) -> aCons qc (map callType2AType cts)) cs)

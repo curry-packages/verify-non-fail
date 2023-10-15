@@ -5,13 +5,50 @@
 module Verify.Helpers where
 
 import Data.Char          ( isDigit )
+import Data.IORef
 import Data.List
 
+import Analysis.ProgInfo
+import Analysis.Types
+import CASS.Server        ( analyzeGeneric, analyzePublic )
 import Data.Time          ( ClockTime )
 import FlatCurry.Goodies
 import FlatCurry.Types
 import System.CurryPath   ( lookupModuleSourceInLoadPath )
 import System.Directory   ( getModificationTime )
+
+import Verify.Options     ( Options, printWhenStatus )
+
+------------------------------------------------------------------------------
+-- Store for the analysis information of CASS. Used to avoid multiple reads.
+data AnalysisStore a = AnaStore [(String, ProgInfo a)]
+
+-- Loads CASS analysis results for a module and its imported entities.
+loadAnalysisWithImports :: (Read a, Show a) =>
+   IORef (AnalysisStore a) -> Analysis a -> Options -> Prog -> IO (QName -> a)
+loadAnalysisWithImports anastore analysis opts prog = do
+  maininfo <- getOrAnalyze (progName prog)
+  impinfos <- mapM getOrAnalyze (progImports prog)
+  return $ progInfo2Map $
+    foldr combineProgInfo maininfo (map publicProgInfo impinfos)
+ where
+  getOrAnalyze mname = do
+    AnaStore minfos <- readIORef anastore
+    maybe (do printWhenStatus opts $ "Getting " ++ analysisName analysis ++
+                " for '" ++ mname ++ "' via CASS..."
+              minfo <- fmap (either id error) $ analyzeGeneric analysis mname
+              writeIORef anastore (AnaStore ((mname,minfo) : minfos))
+              return minfo)
+          return
+          (lookup mname minfos)
+
+  -- Transform the analysis information from CASS into a mapping from
+  -- names to analysis information.
+  progInfo2Map :: ProgInfo a -> (QName -> a)
+  progInfo2Map proginfo qf =
+    maybe (error $ "Analysis information of '" ++ snd qf ++ "'' not found!")
+          id
+          (lookupProgInfo qf proginfo)
 
 ------------------------------------------------------------------------------
 -- Sort a list function analysis results according to their names.
