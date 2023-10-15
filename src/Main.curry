@@ -28,7 +28,8 @@ import FlatCurry.NormalizeLet
 import qualified FlatCurry.Pretty as FCP
 import FlatCurry.Types
 import System.CurryPath           ( runModuleAction )
-import System.Directory           ( createDirectoryIfMissing, doesFileExist, removeDirectory )
+import System.Directory           ( createDirectoryIfMissing, doesFileExist
+                                  , removeDirectory )
 import System.FilePath            ( (</>) )
 import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
 
@@ -45,7 +46,7 @@ import Verify.Statistics
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 12/10/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 15/10/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -340,18 +341,20 @@ addFailedFunc exp mbvts = do
   maybe (addCallTypeRestriction qf failACallType)
         (\vts ->
            if any ((`elem` args) . fst) vts
-             then do oldct <- getCallType qf ar
-                     let ncts = map (\v -> maybe anyType id (lookup v vts))
-                                    args
-                         newct = maybe Nothing
-                                       (\oldcts -> Just (map (uncurry joinAType)
-                                                             (zip oldcts ncts)))
-                                       oldct
-                     printIfVerb 2 $ "TRY TO REFINE FUNCTION CALL TYPE: " ++
-                                     snd qf ++ ": " ++ prettyFunCallAType newct
-                     addCallTypeRestriction qf newct
-             else do printIfVerb 2 "CANNOT REFINE FUNCTION CALL TYPE"
-                     addCallTypeRestriction qf failACallType
+             then do
+               oldct <- getCallType qf ar
+               let ncts = map (\v -> maybe anyType id (lookup v vts))
+                             args
+                   newct = maybe Nothing
+                                 (\oldcts -> Just (map (uncurry joinAType)
+                                                       (zip oldcts ncts)))
+                                 oldct
+               printIfVerb 2 $ "TRY TO REFINE FUNCTION CALL TYPE: " ++
+                               snd qf ++ ": " ++ prettyFunCallAType newct
+               addCallTypeRestriction qf newct
+             else do
+               printIfVerb 2 $ "CANNOT REFINE CALL TYPE OF FUNCTION " ++ snd qf
+               addCallTypeRestriction qf failACallType
         )
         mbvts
 
@@ -404,7 +407,7 @@ addVarType vartype = do
 
 -- Adds a new variable `Any` type to the current set of variable types.
 addVarAnyType :: Int -> VerifyStateM ()
-addVarAnyType v = addVarType (v, IOT [([], anyType)], [])
+addVarAnyType v = addVarType (ioVarType v anyType)
 
 -- Removes an `Any` type for a given variable from the current
 -- set of variable types.
@@ -588,9 +591,9 @@ verifyVarExpr ve exp = case exp of
                        printIfVerb 2 $ "UNSATISFIED CALL TYPE: " ++
                          "partial application of non-total function\n"
                        addFailedFunc exp Nothing
-                     return [consIOType qf vs ve]
-      _        -> -- note: also partial calls are considered as constructors
-                  do return [consIOType qf vs ve]
+                     -- note: also partial calls are considered as constructors
+                     returnConsIOType qf vs ve
+      _        -> returnConsIOType qf vs ve
   Let bs e      -> do addVarExps bs
                       mapM_ (addVarAnyType . fst) bs
                       iotss <- mapM (\ (v,be) -> verifyVarExpr v be) bs
@@ -616,10 +619,13 @@ verifyVarExpr ve exp = case exp of
     vts <- getVarTypesOf v
     when (null vts) (addVarAnyType v)
 
-  -- create input/output type for a constructor (improve by type info?)
-  consIOType qc vs rv =
-    let anys = anyTypes (length vs)
-    in (rv, IOT [(anys, aCons qc anys)], vs)
+  -- Return an input/output type for a constructor and its arguments
+  returnConsIOType qc vs rv = do
+    vts <- getVarTypes
+    let vstypes = map (flip getVarType vts) vs
+    --let anys = anyTypes (length vs)  -- TODO: use vs types from VarTypes!!!!
+    --return [(rv, IOT [(anys, aCons qc anys)], vs)]
+    return [(rv, IOT [(vstypes, aCons qc vstypes)], vs)]
 
 -- Verify the nonfailing type of a function
 verifyFuncCall :: Bool -> Expr -> QName -> [Int] -> VerifyStateM ()
@@ -667,7 +673,7 @@ verifyMissingBranches _ _ [] = do
   currfn <- getCurrentFuncName
   error $ "Function " ++ snd currfn ++ " contains case with empty branches!"
 verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
-  allcons <- getAllCons -- >>= return . map (map fst)
+  allcons <- getAllCons
   let otherqs  = map ((\p -> (patCons p, length(patArgs p))) . branchPattern) bs
       siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
                        id
@@ -712,12 +718,15 @@ verifyBranch casevar ve (Branch (LPattern l)    e) = do
 verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   addVarExps (map (\v -> (v, Var v)) vs)
   vts <- getVarTypes
-  let vartype = aCons qc (anyTypes (length vs))
-      branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar vartype vts)
-  if getVarType casevar branchvartypes == emptyType
+  let pattype        = aCons qc (anyTypes (length vs))
+      branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar pattype vts)
+      casevartype    = getVarType casevar branchvartypes
+  if casevartype == emptyType
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
-            mapM_ addVarAnyType vs
+            mapM_ (\(v,t) -> addVarType (ioVarType v t))
+                  (zip vs (consArgTypes qc (length vs) casevartype))
+            --mapM_ addVarAnyType vs
             iots <- verifyVarExpr ve e
             setVarTypes vts
             return iots

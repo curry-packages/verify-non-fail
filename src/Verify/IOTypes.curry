@@ -8,7 +8,8 @@
 
 module Verify.IOTypes
   ( InOutType(..), isAnyIOType, showIOT, inOutATypeFunc
-  , VarType, showVarTypes, showArgumentVars, simplifyVarTypes, bindVarInIOTypes
+  , VarType, ioVarType, showVarTypes, showArgumentVars, simplifyVarTypes
+  , bindVarInIOTypes
   )
  where
 
@@ -68,7 +69,7 @@ normalizeIOT (IOT iotypes) =
 --- for the operation to be analyzed.
 data InOutTypeState = InOutTypeState
   { currentOp   :: QName               -- the name of the current function
-  , varPosAType :: [(Int,(Pos,AType))] -- variable and their positions/types
+  , varPosAType :: [(Int,(Pos,AType))] -- variables and their positions/types
   , ccAType     :: [AType]             -- current call type of the operation
   , resValue    :: (QName -> AType)    -- analysis info about result values
   }
@@ -138,7 +139,8 @@ inOutATypeExpr tst exp = case exp of
     | isFreshVarPos vpos
     = addNewAVars (patternArgs pat) tst -- fresh var, do not change call type
     | otherwise
-    = case pat of Pattern _ vs -> addNewAVars vs tst'
+    = trace ("Variable " ++ show v ++ " at position " ++ show vpos) $
+      case pat of Pattern _ vs -> addNewAVars vs tst' --- WRONG: add vpos to new vars!!!!!
                   LPattern _   -> tst'
    where
     aconsOfPat = case pat of Pattern qc vs -> aCons qc (anyTypes (length vs))
@@ -170,6 +172,10 @@ inOutATypeExpr tst exp = case exp of
 --- * the list `vs` of arguments of the function to which `v` is bound
 ---   (which could be empty).
 type VarType = (Int,InOutType,[Int])
+
+--- A variable with a type represented as an input/output variable type.
+ioVarType :: Int -> AType -> VarType
+ioVarType v atype = (v, IOT [([], atype)], [])
 
 --- Shows a list of input/output variables types.
 showVarTypes :: [VarType] -> String
@@ -215,13 +221,13 @@ simplifyVarTypes = simpDefVarTypes []
     (v, IOT [(ats,rt)], vs) -> filter ((/= anyType) . snd) ((v,rt) : zip vs ats)
     _                       -> []
 
-  -- propagate definite variable types into a set of in/out variable types:
+  -- Propagate definite variable types into a set of in/out variable types:
   propagateDefTypes :: [(Int,AType)] -> [VarType] -> [VarType]
   propagateDefTypes []           viots = viots
   propagateDefTypes ((v,vt):vts) viots =
     propagateDefTypes vts (map (propagateDefType (v,vt)) viots)
 
-  -- propagate a definite variable type into an in/out variable type
+  -- Propagate a definite variable type into an in/out variable type
   -- by either refining the result types or argument types:
   propagateDefType :: (Int,AType) -> VarType -> VarType
   propagateDefType (v,vt) (v1, IOT iots, vs1)
