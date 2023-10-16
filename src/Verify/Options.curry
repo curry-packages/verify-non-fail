@@ -28,6 +28,7 @@ import System.Process        ( exitWith )
 data Options = Options
   { optVerb        :: Int  -- verbosity (0: quiet, 1: status, 2: interm, 3: all)
   , optHelp        :: Bool -- if help info should be printed
+  , optFunction    :: String -- show the result for this function
   , optImports     :: Bool -- read/analyze imports/prelude? (only for testing)
   , optDeleteCache :: Bool -- delete the analysis cache?
   , optRerun       :: Bool -- rerun verification of current module
@@ -44,7 +45,8 @@ data Options = Options
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
-  Options 1 False True False False True False False True False False False False
+  Options 1 False "" True False False True False False True False
+          False False False
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -88,6 +90,9 @@ options =
   , Option "e" ["error"]
            (NoArg (\opts -> opts { optError = True }))
            "consider 'Prelude.error' as a failing operation"
+  , Option "f" ["function"]
+            (ReqArg (\s opts -> opts { optFunction = s }) "<f>")
+            "show the call and in/out type for function <f>"
   , Option "i" ["iotypes"]
             (NoArg (\opts -> opts { optIOTypes = True }))
            "show input/output types"
@@ -105,7 +110,7 @@ options =
            "rerun verification of current module\n(ignore results of previous verification)"
   , Option "s" ["statistics"]
            (NoArg (\opts -> opts { optStats = True }))
-           "show and store statistics (functions, failures,...)"
+           "show/store statistics (functions, failures,...)"
   , Option "t" ["time"]
            (NoArg (\opts -> opts { optTime = True }))
            "show total verification time for each module"

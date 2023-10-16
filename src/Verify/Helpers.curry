@@ -147,6 +147,16 @@ arityOfCons allcons qc@(mn,cn)
           id
           (lookup qc (concat allcons))
 
+--- Is a non-empty list of constructors complete, i.e., does it contain
+--- all the constructors of a type?
+--- The first argument contains all the constructors in a program.
+isCompleteConstructorList :: [[(QName,Int)]] -> [QName] -> Bool
+isCompleteConstructorList _       []     = False
+isCompleteConstructorList allcons (c:cs) =
+  maybe False
+        (\siblings -> all (`elem` cs) (map fst siblings))
+        (getSiblingsOf allcons c)
+
 --- Some predefined data constructors grouped by their types.
 --- Used for testing in module CallTypes.
 stdConstructors :: [[QName]]

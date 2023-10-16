@@ -46,7 +46,7 @@ import Verify.Statistics
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 15/10/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 16/10/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -94,9 +94,9 @@ verifyModule astore opts mname = do
          (sortFunResults (if optPublic opts then pubcalltypes else ntcalltypes))
 
   mboldacalltypes <- readCallTypeFile opts mtime mname
-  let pubmodacalltypes = map funcCallType2AType oldpubcalltypes
+  let pubmodacalltypes = map (funcCallType2AType allcons) oldpubcalltypes
       acalltypes = unionBy (\x y -> fst x == fst y) pubmodacalltypes
-                           (maybe (map funcCallType2AType calltypes)
+                           (maybe (map (funcCallType2AType allcons) calltypes)
                                   id
                                   mboldacalltypes)
       ntacalltypes  = filter (not . isTotalACallType . snd) acalltypes
@@ -150,7 +150,7 @@ verifyModule astore opts mname = do
        return (numits, tdiff, st)
      else return (0, 0, vstate)
   -- print statistics:
-  let finalacalltypes   = vstACallTypes vst
+  let finalacalltypes   = vstCallTypes vst
       finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
       (stattxt,statcsv) = showStatistics opts vtime vnumits visfuncs
                             (length fdecls)
@@ -162,6 +162,20 @@ verifyModule astore opts mname = do
     storeTypes opts mname (allConsOfTypes (progTypes flatprog))
                finalacalltypes iotypes
     storeStatistics opts mname stattxt statcsv
+  unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
+
+showFunctionInfo :: Options -> String -> VerifyState -> IO ()
+showFunctionInfo opts mname vst = do
+  let f = optFunction opts
+      qf = (mname, f)
+  if qf `notElem` map funcName (vstFuncDecls vst)
+    then putStrLn $ "Function '" ++ snd qf ++ "' not defined!"
+    else do
+      let ctype = maybe (Just [anyType]) id (lookup qf (vstCallTypes vst))
+          iot   = maybe (trivialInOutType 0) id (lookup qf (vstFuncTypes vst))
+      putStrLn $ "Function '" ++ f ++ "':"
+      putStrLn $ "Call type  : " ++ prettyFunCallAType ctype
+      putStrLn $ "In/out type: " ++ showIOT iot
 
 -- Try to verify a module, possibly in several iterations.
 -- The second argument is the number of already performed iterations,
@@ -175,8 +189,8 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
   unless (null newfailures) $ printWhenStatus opts $ unlines $
     "Operations with refined call types (used in future analyses):" :
     showFunResults prettyFunCallAType (reverse newfailures)
-  let st' = st { vstACallTypes = unionBy (\x y -> fst x == fst y) newfailures
-                                         (vstACallTypes st)
+  let st' = st { vstCallTypes = unionBy (\x y -> fst x == fst y) newfailures
+                                         (vstCallTypes st)
                , vstNewFailed = [] }
   if null newfailures
     then do printFailures st'
@@ -192,7 +206,7 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
       printWhenStatus opts $ "Repeat verification with new call types..." ++
         "(" ++ show (length newfdecls) ++ " functions)"
       --putStrLn $ unlines $
-      --  showFunResults prettyFunCallAType (sortFunResults $ vstACallTypes st')
+      --  showFunResults prettyFunCallAType (sortFunResults $ vstCallTypes st')
       tryVerifyProg opts (numits + 1) st' mname funusage newfdecls
  where
   failLine = take 78 (repeat '!')
@@ -214,7 +228,7 @@ showVerifyResult :: Options -> VerifyState -> String -> [FuncDecl] -> IO ()
 showVerifyResult opts vst mname fdecls = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
-                            (vstACallTypes vst)
+                            (vstCallTypes vst)
   if null calltypes || optVerb opts == 0
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
@@ -259,14 +273,14 @@ data VerifyState = VerifyState
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
   , vstVarTypes    :: [VarType]         -- map variable to its abstract types
-  , vstImpACallTypes :: [(QName,ACallType)] -- abstract call types of imports
-  , vstACallTypes    :: [(QName,ACallType)] -- abstract call types of module
+  , vstImpCallTypes:: [(QName,ACallType)] -- abstract call types of imports
+  , vstCallTypes   :: [(QName,ACallType)] -- abstract call types of module
   , vstFuncTypes   :: [(QName,InOutType)]  -- the in/out type for each function
   , vstFailedFuncs :: [(QName,Int,Expr)]   -- functions with illegal calls
   , vstPartialBranches :: [(QName,Int,Expr,[QName])] -- incomplete branches
   , vstNewFailed   :: [(QName,ACallType)] -- new failed function call types
-  , vstStats    :: (Int,Int) -- statistics: non-trivial calls / incomplete cases
-  , vstToolOpts :: Options
+  , vstStats       :: (Int,Int) -- numbers: non-trivial calls / incomplete cases
+  , vstToolOpts    :: Options
   }
 
 --- Initializes the verification state.
@@ -343,20 +357,24 @@ addFailedFunc exp mbvts = do
            if any ((`elem` args) . fst) vts
              then do
                oldct <- getCallType qf ar
-               let ncts = map (\v -> maybe anyType id (lookup v vts))
-                             args
+               let ncts  = map (\v -> maybe anyType id (lookup v vts)) args
                    newct = maybe Nothing
                                  (\oldcts -> Just (map (uncurry joinAType)
                                                        (zip oldcts ncts)))
                                  oldct
-               printIfVerb 2 $ "TRY TO REFINE FUNCTION CALL TYPE: " ++
-                               snd qf ++ ": " ++ prettyFunCallAType newct
+               if oldct == newct
+                 then noRefinementFor qf
+                 else do
+                   printIfVerb 2 $ "TRY TO REFINE FUNCTION CALL TYPE OF " ++
+                                   snd qf ++ " TO: " ++ prettyFunCallAType newct
                addCallTypeRestriction qf newct
-             else do
-               printIfVerb 2 $ "CANNOT REFINE CALL TYPE OF FUNCTION " ++ snd qf
-               addCallTypeRestriction qf failACallType
+             else noRefinementFor qf
         )
         mbvts
+ where
+  noRefinementFor qf = do
+    printIfVerb 2 $ "CANNOT REFINE CALL TYPE OF FUNCTION " ++ snd qf
+    addCallTypeRestriction qf failACallType
 
 -- Adds an info about cases with missing branches in the current function.
 addMissingCase :: Expr -> [QName] -> VerifyStateM ()
@@ -434,9 +452,9 @@ getCallType qf ar
     (maybe (trace ("Warning: call type of operation " ++ show qf ++
                    " not found!") trivialACallType)
            id
-           (lookup qf (vstImpACallTypes st)))
+           (lookup qf (vstImpCallTypes st)))
     id
-    (lookup qf (vstACallTypes st))
+    (lookup qf (vstCallTypes st))
  where
   trivialACallType = Just $ take ar (repeat anyType)
 
@@ -446,16 +464,14 @@ getCallType qf ar
 getFuncType :: QName -> Int -> VerifyStateM InOutType
 getFuncType qf ar
   | isEncSearchOp qf || isSetFunOp qf
-  = return trivialInOutType
+  = return $ trivialInOutType ar
   | otherwise
   = do st <- get
-       maybe (do lift $ putStrLn $ "WARNING: in/out type of " ++ show qf ++
-                                   " not found!"
-                 return trivialInOutType)
+       maybe (do lift $ putStrLn $
+                   "WARNING: in/out type of '" ++ show qf ++ "' not found!"
+                 return $ trivialInOutType ar)
              return
              (lookup qf (vstFuncTypes st))
- where
-  trivialInOutType = IOT [(take ar (repeat anyType), anyType)]
 
 -- Increment number of non-trivial calls.
 incrNonTrivialCall :: VerifyStateM ()
@@ -725,7 +741,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
             mapM_ (\(v,t) -> addVarType (ioVarType v t))
-                  (zip vs (consArgTypes qc (length vs) casevartype))
+                  (zip vs (argTypesOfCons qc (length vs) casevartype))
             --mapM_ addVarAnyType vs
             iots <- verifyVarExpr ve e
             setVarTypes vts

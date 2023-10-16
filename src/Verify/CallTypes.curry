@@ -72,14 +72,11 @@ simpFuncCallType allcons ctss =
     complete2Any (map (\ (qc,cts) -> (qc, map simpCallType cts)) qcts)
    where
     complete2Any [] = MCons []
-    complete2Any (c:cs)
-      | all (== AnyT) (concatMap snd (c:cs)) && -- all arguments AnyT?
-        maybe False
-              (\qcs -> all (`elem` map fst cs) (map fst qcs))
-              (getSiblingsOf allcons (fst c))
+    complete2Any cs@(_:_)
+      | all (== AnyT) (concatMap snd cs) && -- all arguments AnyT?
+        isCompleteConstructorList allcons (map fst cs)
       = AnyT
-      | otherwise = MCons (c:cs)
-
+      | otherwise = MCons cs
 
 -- Join two  call types.
 joinCT :: CallType -> CallType -> CallType
@@ -287,8 +284,9 @@ type ACallType = Maybe [AType]
 --- Since the abstract call type of an operation is a single list of abstract
 --- call types for the arguments so that a disjunction of argument lists
 --- cannot be expressed, the disjunctions are joined (i.e., intersected).
-funcCallType2AType :: (QName, [[CallType]]) -> (QName, ACallType)
-funcCallType2AType (qn,fct) =
+funcCallType2AType :: [[(QName,Int)]] -> (QName, [[CallType]])
+                   -> (QName, ACallType)
+funcCallType2AType allcons (qn,fct) =
   (qn, if null fct
          then failACallType
          else foldr1 joinACallType (map callTypes2ATypes fct))
@@ -296,13 +294,36 @@ funcCallType2AType (qn,fct) =
   callTypes2ATypes cts = let ats = map callType2AType cts
                          in if any (== emptyType) ats
                               then Nothing
-                              else Just ats
+                              else Just (map (normalizeAType allcons) ats)
 
   callType2AType AnyT       = anyType
   callType2AType (MCons cs) =
-    foldr lubAType emptyType
-          (map (\(qc,cts) -> aCons qc (map callType2AType cts)) cs)
+    let cats = map (\(qc,cts) -> ((qc, length cts),
+                                  aCons qc (map callType2AType cts))) cs
+    in if isCompleteConstructorList allcons (map fst cs) &&
+          all (== anyType) -- are all abstract constructor arguments any type?
+              (concatMap (\((qc,ar),aqc) -> argTypesOfCons qc ar aqc) cats)
+        then anyType
+        else foldr lubAType emptyType (map snd cats)
 
+--- Normalize an abstract type by recursively replacing complete sets of
+--- constructors with `anyType` arguments by `anyType`.
+--- Note that this works only for abstract values which are depth-bounded,
+--- i.e., not for regular types. Thus, this operation might be better moved
+--- into the implementation of a particular abstract domain.
+normalizeAType :: [[(QName,Int)]] -> AType -> AType
+normalizeAType allcons at =
+  let cs   = consOfType at
+      cats = map (\qc -> (qc, map (normalizeAType allcons)
+                              (argTypesOfCons qc 0 at))) cs
+  in if null cs
+       then at
+       else if isCompleteConstructorList allcons cs &&
+               all (== anyType) -- are all constructor arguments any type?
+                   (concatMap snd cats)
+              then anyType
+              else foldr lubAType emptyType
+                         (map (\(qc,ats) -> aCons qc ats) cats)
 
 -- Describes an abstract call type a totally reducible operation?
 isTotalACallType :: ACallType -> Bool

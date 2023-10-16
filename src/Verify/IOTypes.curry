@@ -7,7 +7,7 @@
 ------------------------------------------------------------------------------
 
 module Verify.IOTypes
-  ( InOutType(..), isAnyIOType, showIOT, inOutATypeFunc
+  ( InOutType(..), trivialInOutType, isAnyIOType, showIOT, inOutATypeFunc
   , VarType, ioVarType, showVarTypes, showArgumentVars, simplifyVarTypes
   , bindVarInIOTypes
   )
@@ -34,6 +34,10 @@ import Verify.Helpers
 --- of input/output type pairs.
 data InOutType = IOT [([AType],AType)]
   deriving Eq
+
+--- The trivial `InOutType` for a function of a given arity.
+trivialInOutType :: Int -> InOutType
+trivialInOutType ar = IOT [(take ar (repeat anyType), anyType)]
 
 -- Is the InOutType a general one, i.e., a mapping from Any's to Any?
 isAnyIOType :: InOutType -> Bool
@@ -68,32 +72,60 @@ normalizeIOT (IOT iotypes) =
 --- variables (indices) to their positions and the current call type
 --- for the operation to be analyzed.
 data InOutTypeState = InOutTypeState
-  { currentOp   :: QName               -- the name of the current function
-  , varPosAType :: [(Int,(Pos,AType))] -- variables and their positions/types
-  , ccAType     :: [AType]             -- current call type of the operation
-  , resValue    :: (QName -> AType)    -- analysis info about result values
+  { currentOp :: QName                  -- the name of the current function
+  , varPosPat :: [(Int,(Pos,CPattern))] -- variables and positions/patterns
+  , ccPattern :: [CPattern]             -- current call pattern of the operation
+  , resValue  :: (QName -> AType)       -- analysis info about result values
   }
 
--- Add new variables not occurring in the left-hand side:
-addNewAVars :: [Int] -> InOutTypeState -> InOutTypeState
-addNewAVars vs iost =
-  iost { varPosAType = zip vs (map (\_ -> (freshVarPos,anyType)) vs) ++
-                       varPosAType iost }
+-- Representation of constructor patterns:
+data CPattern = AnyP | ConsP QName [CPattern]
+ deriving (Eq,Show)
 
--- Sets the type of a variable (which already exists!).
-setVarType :: Int -> AType -> InOutTypeState -> InOutTypeState
-setVarType vi vt iost =
-  iost { varPosAType = 
+-- `replacePattern pat pos spat` puts `spat` in `pat` at position `pos`.
+replacePattern :: CPattern -> Pos -> CPattern -> CPattern
+replacePattern _               []     spat = spat
+replacePattern AnyP            (_:_)  _    = error "replacePattern: AnyP"
+replacePattern (ConsP qn pats) (p:ps) spat =
+  if p >= length pats
+    then error "replacePattern: illegal position"
+    else ConsP qn (replace (replacePattern (pats!!p) ps spat) p pats)
+
+-- Transform a constructor pattern into an abstract type.
+pattern2AType :: CPattern -> AType
+pattern2AType AnyP          = anyType
+pattern2AType (ConsP qc ps) = aCons qc (map pattern2AType ps)
+
+
+-- Add new variables not occurring in the left-hand side:
+addNewVars :: [Int] -> InOutTypeState -> InOutTypeState
+addNewVars vs iost =
+  iost { varPosPat = zip vs (map (\_ -> (freshVarPos,AnyP)) vs) ++
+                     varPosPat iost }
+
+-- Add new variable arguments under a given position.
+addVarArgsAt :: Pos -> [Int] -> InOutTypeState -> InOutTypeState
+addVarArgsAt pos vs iost =
+  iost { varPosPat = zip vs (map (\p -> (pos ++ [p],AnyP)) [0..]) ++
+                     varPosPat iost }
+
+-- Sets the pattern type of a variable (which already exists!).
+setVarPattern :: Int -> CPattern -> InOutTypeState -> InOutTypeState
+setVarPattern vi vt iost =
+  iost { varPosPat = 
            map (\ (v,(p,t)) -> if v==vi then (v,(p,vt)) else (v,(p,t)))
-               (varPosAType iost) }
+               (varPosPat iost) }
 
 --- The initial state assumes that all arguments have type `Any`.
 initInOutTypeState :: QName -> [Int] -> (QName -> AType) -> InOutTypeState
 initInOutTypeState qf vs resval =
-  InOutTypeState qf (zip vs (map (\i -> ([i],anyType)) [0..]))
-                 (take (length vs) (repeat anyType))
+  InOutTypeState qf
+                 (zip vs (map (\i -> ([i],AnyP)) [0..]))
+                 (take (length vs) (repeat AnyP))
                  resval
 
+--- Compute the in/out type for a function declaration w.r.t. a given
+--- assignment of function names to result types.
 inOutATypeFunc :: (QName -> AType) -> FuncDecl -> (QName,InOutType)
 inOutATypeFunc resval (Func qf ar _ _ rule) = case rule of
   Rule vs exp -> if length vs /= ar
@@ -106,17 +138,17 @@ inOutATypeFunc resval (Func qf ar _ _ rule) = case rule of
 inOutATypeExpr :: InOutTypeState -> Expr -> InOutType
 inOutATypeExpr tst exp = case exp of
   Var v         -> maybe (varNotFound v)
-                         (\ (_,ct) -> IOT [(ccAType tst, ct)])
-                         (lookup v (varPosAType tst))
-  Lit l         -> IOT [(ccAType tst, aLit l)]
+                         (\ (_,ct) -> IOT [(cpatAsAType, pattern2AType ct)])
+                         (lookup v (varPosPat tst))
+  Lit l         -> IOT [(cpatAsAType, aLit l)]
   Comb ct qf es -> if ct == FuncCall
-                     then IOT [(ccAType tst, resValue tst qf)]
+                     then IOT [(cpatAsAType, resValue tst qf)]
                      else let argtypes = map (valuesOfIOT . inOutATypeExpr tst)
                                              es
-                          in IOT [(ccAType tst, aCons qf argtypes)]
-  Let vs e      -> inOutATypeExpr (addNewAVars (map fst vs) tst) e
+                          in IOT [(cpatAsAType, aCons qf argtypes)]
+  Let vs e      -> inOutATypeExpr (addNewVars (map fst vs) tst) e
                     -- TODO: make let analysis more precise
-  Free vs e     -> inOutATypeExpr (addNewAVars vs tst) e
+  Free vs e     -> inOutATypeExpr (addNewVars vs tst) e
   Or e1 e2      -> combineIOTs (inOutATypeExpr tst e1)
                                (inOutATypeExpr tst e2)
   Case _ ce bs  -> case ce of
@@ -130,6 +162,8 @@ inOutATypeExpr tst exp = case exp of
                                     bs)
   Typed e _     -> inOutATypeExpr tst e
  where
+  cpatAsAType = map pattern2AType (ccPattern tst)
+
   varNotFound v = error $ "Function " ++ snd (currentOp tst) ++
                           ": variable " ++ show v ++ " not found"
 
@@ -137,29 +171,28 @@ inOutATypeExpr tst exp = case exp of
 
   addVarBranchPattern v pat
     | isFreshVarPos vpos
-    = addNewAVars (patternArgs pat) tst -- fresh var, do not change call type
+    = addNewVars (patternArgs pat) tst -- fresh var, do not change call type
     | otherwise
-    = trace ("Variable " ++ show v ++ " at position " ++ show vpos) $
-      case pat of Pattern _ vs -> addNewAVars vs tst' --- WRONG: add vpos to new vars!!!!!
+    = --trace ("Variable " ++ show v ++ " at position " ++ show vpos) $
+      case pat of Pattern _ vs -> addVarArgsAt vpos vs tst'
                   LPattern _   -> tst'
    where
-    aconsOfPat = case pat of Pattern qc vs -> aCons qc (anyTypes (length vs))
-                             LPattern l    -> aLit l
-    tst' = (setVarType v aconsOfPat tst)
-             { ccAType = setACons2CT aconsOfPat vpos (ccAType tst) }
-    vpos = maybe (varNotFound v) fst (lookup v (varPosAType tst))
+    vpos = maybe (varNotFound v) fst (lookup v (varPosPat tst))
 
-  addBranchPattern (Pattern _ vs) = addNewAVars vs tst
+    consPattern = case pat of
+                    Pattern qc vs -> ConsP qc (take (length vs) (repeat AnyP))
+                    LPattern l    -> ConsP (litAsCons l) []
+
+    tst' = (setVarPattern v consPattern tst)
+              { ccPattern = setPatternAtPos consPattern vpos (ccPattern tst) }
+
+  addBranchPattern (Pattern _ vs) = addNewVars vs tst
   addBranchPattern (LPattern _)   = tst
 
-  -- Sets an (abstract) constructor type for a position in a given list
-  -- of argument types.
-  setACons2CT :: AType -> Pos -> [AType] -> [AType]
-  setACons2CT _  []  ats = trace "setACons2CT: root occurrence" ats
-  setACons2CT qt [p] ats = replace (joinAType qt (ats!!p)) p ats
-  setACons2CT _  ps@(_:_:_) ats =
-    trace ("setACons2CT: deep position occurred: " ++ show ps) ats
-
+  -- Sets a pattern at a position in a given list of patterns.
+  setPatternAtPos :: CPattern -> Pos -> [CPattern] -> [CPattern]
+  setPatternAtPos _  []     pts = trace "setPatternAtPos: root occurrence" pts
+  setPatternAtPos pt (p:ps) pts = replace (replacePattern (pts!!p) ps pt) p pts
 
 ------------------------------------------------------------------------------
 -- Handling input/output variable types.
