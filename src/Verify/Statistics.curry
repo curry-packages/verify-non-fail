@@ -11,6 +11,7 @@ module Verify.Statistics ( showStatistics, storeStatistics )
 import Control.Monad        ( when )
 
 import AbstractCurry.Types  ( QName )
+import Analysis.TermDomain  ( TermDomain )
 import Text.CSV
 
 import Verify.CallTypes
@@ -26,8 +27,9 @@ statsFile :: String -> String
 statsFile mname = mname ++ "-STATISTICS"
 
 -- Show statistics in textual and in CSV format:
-showStatistics :: Options -> Int -> Int -> [QName] -> Int -> (Int,Int)
-               -> (Int,Int) -> [(QName,ACallType)]
+showStatistics :: TermDomain a => Options -> Int -> Int -> [QName]
+               -> Int -> (Int,Int)
+               -> (Int,Int) -> [(QName, ACallType a)]
                -> (Int,Int) -> (String, [String])
 showStatistics opts vtime numits visfuncs numallfuncs
                (numpubiotypes, numalliotypes)

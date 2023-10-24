@@ -9,7 +9,7 @@
 module Verify.Domain
   ( valueAnalysis
   , AType, emptyType, anyType, aCons, aLit, litAsCons
-  , consOfType, argTypesOfCons, joinAType, lubAType, showAType
+  , consOfType, argTypesOfCons, joinType, lubType, showType
   )
  where
 
@@ -37,13 +37,13 @@ anyType :: AType
 anyType = TD.anyType
 
 --- Least upper bound of abstract values.
-lubAType :: AType -> AType -> AType
-lubAType = TD.lubType
+lubType :: AType -> AType -> AType
+lubType = TD.lubType
 
 --- Join two abstract values.
 --- The result is `emptyType` if they are not compatible.
-joinAType :: AType -> AType -> AType
-joinAType = TD.joinType
+joinType :: AType -> AType -> AType
+joinType = TD.joinType
 
 --- The representation of a constructor application to a list of
 --- abstract argument types.
@@ -69,7 +69,7 @@ argTypesOfCons :: QName -> Int -> AType -> [AType]
 argTypesOfCons = TD.argTypesOfCons
 
 --- Shows an abstract value.
-showAType :: AType -> String
-showAType = TD.showType
+showType :: AType -> String
+showType = TD.showType
 
 ------------------------------------------------------------------------------

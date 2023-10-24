@@ -62,6 +62,12 @@ main = do
     ms -> do astore <- newIORef (AnaStore [])
              mapM_ (runModuleAction (verifyModule astore opts)) ms
 
+-- compatibility definitions for the moment:
+type VarType = Verify.IOTypes.VarType AType
+type InOutType = Verify.IOTypes.InOutType AType
+type ACallType = Verify.CallTypes.ACallType AType
+
+
 --- Verify a single module.
 verifyModule :: IORef (AnalysisStore AType) -> Options -> String -> IO ()
 verifyModule astore opts mname = do
@@ -362,7 +368,7 @@ addFailedFunc exp mbvts = do
                oldct <- getCallType qf ar
                let ncts  = map (\v -> maybe anyType id (lookup v vts)) args
                    newct = maybe Nothing
-                                 (\oldcts -> Just (map (uncurry joinAType)
+                                 (\oldcts -> Just (map (uncurry joinType)
                                                        (zip oldcts ncts)))
                                  oldct
                if oldct == newct
@@ -684,7 +690,7 @@ verifyFuncCall errorfail exp qf vs
                     )
                     (specializeToRequiredType vts atype)
  where
-  printVATypes = intercalate ", " . map (\ (v,t) -> show v ++ '/' : showAType t)
+  printVATypes = intercalate ", " . map (\ (v,t) -> show v ++ '/' : showType t)
 
 -- Verify whether missing branches exists and are not reachable.
 verifyMissingBranches :: Expr -> Int -> [BranchExpr] -> VerifyStateM ()
@@ -704,7 +710,7 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
     cvtype <- getVarTypes >>= return . getVarType casevar
     let posscs = map fst
                      (filter (\(c,ar) -> let ctype = aCons c (anyTypes ar)
-                                         in joinAType cvtype ctype /= emptyType)
+                                         in joinType cvtype ctype /= emptyType)
                              missingcs)
     unless (null posscs) $ do
       printIfVerb 2 $ showIncompleteBranch currfn exp posscs ++ "\n"
@@ -715,7 +721,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
   currfn <- getCurrentFuncName
   let lits = lit : map (patLiteral . branchPattern) bs
   cvtype <- getVarTypes >>= return . getVarType casevar
-  unless (isSubtypeOf cvtype (foldr1 lubAType (map aLit lits))) $ do
+  unless (isSubtypeOf cvtype (foldr1 lubType (map aLit lits))) $ do
     printIfVerb 2 $ showIncompleteBranch currfn exp [] ++ "\n"
     showVarExpTypes
     addMissingCase exp []
@@ -758,7 +764,7 @@ getVarType v viots =
        then error $ "Type of variable " ++ show v ++ " not found!"
        else let rts = concatMap (\ (_, IOT iots, _) -> map snd iots) vts 
             in if null rts then emptyType
-                           else foldr1 lubAType rts
+                           else foldr1 lubType rts
 
 ------------------------------------------------------------------------------
 --- Computes for a given set of function declarations in a module

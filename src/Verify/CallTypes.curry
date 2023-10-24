@@ -9,11 +9,11 @@ module Verify.CallTypes where
 
 import Data.List
 
+import Analysis.TermDomain ( TermDomain(..), litAsCons )
 import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Types
 
-import Verify.Domain
 import Verify.Helpers
 import Verify.Options
 
@@ -273,19 +273,19 @@ callTypeExpr ctst exp = case exp of
   addBranchPattern (LPattern _)   = ctst
 
 ------------------------------------------------------------------------------
--- An abstract call type of an operation is either `Nothing` in case of
--- an always failing operation, or just a list of abstract types for
--- the arguments.
+-- An abstract call type of an operation (paraeterized over the abstract
+-- domain) is either `Nothing` in case of an always failing operation,
+-- or just a list of abstract types for the arguments.
 -- In the following we provide some operations on abstract call types.
-type ACallType = Maybe [AType]
+type ACallType a = Maybe [a]
 
 --- Transforms a call type for an operation, i.e., a disjunction of a list
 --- of alternative call types for the arguments, into an abstract call type.
 --- Since the abstract call type of an operation is a single list of abstract
 --- call types for the arguments so that a disjunction of argument lists
 --- cannot be expressed, the disjunctions are joined (i.e., intersected).
-funcCallType2AType :: [[(QName,Int)]] -> (QName, [[CallType]])
-                   -> (QName, ACallType)
+funcCallType2AType :: (TermDomain a, Eq a) => [[(QName,Int)]]
+                   -> (QName, [[CallType]]) -> (QName, ACallType a)
 funcCallType2AType allcons (qn,fct) =
   (qn, if null fct
          then failACallType
@@ -304,14 +304,14 @@ funcCallType2AType allcons (qn,fct) =
           all (== anyType) -- are all abstract constructor arguments any type?
               (concatMap (\((qc,ar),aqc) -> argTypesOfCons qc ar aqc) cats)
         then anyType
-        else foldr lubAType emptyType (map snd cats)
+        else foldr lubType emptyType (map snd cats)
 
 --- Normalize an abstract type by recursively replacing complete sets of
 --- constructors with `anyType` arguments by `anyType`.
 --- Note that this works only for abstract values which are depth-bounded,
 --- i.e., not for regular types. Thus, this operation might be better moved
 --- into the implementation of a particular abstract domain.
-normalizeAType :: [[(QName,Int)]] -> AType -> AType
+normalizeAType :: (TermDomain a, Eq a) => [[(QName,Int)]] -> a -> a
 normalizeAType allcons at =
   let cs   = consOfType at
       cats = map (\qc -> (qc, map (normalizeAType allcons)
@@ -322,44 +322,45 @@ normalizeAType allcons at =
                all (== anyType) -- are all constructor arguments any type?
                    (concatMap snd cats)
               then anyType
-              else foldr lubAType emptyType
+              else foldr lubType emptyType
                          (map (\(qc,ats) -> aCons qc ats) cats)
 
 -- Describes an abstract call type a totally reducible operation?
-isTotalACallType :: ACallType -> Bool
+isTotalACallType :: (TermDomain a, Eq a) => ACallType a -> Bool
 isTotalACallType Nothing    = False
 isTotalACallType (Just ats) = all (== anyType) ats
 
 ---- The call type of an operation which has no non-failing arguments
 --- expressible by call types for the arguments.
-failACallType :: ACallType
+failACallType :: TermDomain a => ACallType a
 failACallType = Nothing
 
 --- Is the call type a failure call type?
-isFailACallType :: ACallType -> Bool
+isFailACallType :: TermDomain a => ACallType a -> Bool
 isFailACallType Nothing  = True
 isFailACallType (Just _) = False
 
 -- Pretty print an abstract call type for an operation.
-prettyFunCallAType :: ACallType -> String
+prettyFunCallAType :: TermDomain a => ACallType a -> String
 prettyFunCallAType Nothing    = "<FAILING>"
 prettyFunCallAType (Just ats) = case ats of
   []   -> "()"
-  [at] -> showAType at
-  _    -> "(" ++ intercalate ", " (map showAType ats) ++ ")"
+  [at] -> showType at
+  _    -> "(" ++ intercalate ", " (map showType ats) ++ ")"
 
 --- Join two abstract call types.
-joinACallType :: ACallType -> ACallType -> ACallType
+joinACallType :: (TermDomain a, Eq a) => ACallType a -> ACallType a
+              -> ACallType a
 joinACallType Nothing     _           = Nothing
 joinACallType (Just _)    Nothing     = Nothing
 joinACallType (Just ats1) (Just ats2) =
-  let ats = map (uncurry joinAType) (zip ats1 ats2)
+  let ats = map (uncurry joinType) (zip ats1 ats2)
   in if any (== emptyType) ats then Nothing
                                else Just ats
 
 --- Is a list of abstract call types (first argument) a subtype of
 --- the call type of an operation (second argument)?
-subtypeOfRequiredCallType :: [AType] -> ACallType -> Bool
+subtypeOfRequiredCallType :: (TermDomain a, Eq a) => [a] -> ACallType a -> Bool
 subtypeOfRequiredCallType _   Nothing     = False
 subtypeOfRequiredCallType ats (Just rats) =
   all (uncurry isSubtypeOf) (zip ats rats)
@@ -367,8 +368,8 @@ subtypeOfRequiredCallType ats (Just rats) =
  --- Is an abstract type `at1` a subtype of another abstract type `at2`?
  --- Thus, are all values described by `at1` contained in the set of
  --- values described by `at2`?
-isSubtypeOf :: AType -> AType -> Bool
-isSubtypeOf  at1 at2  = joinAType at1 at2 == at1
+isSubtypeOf :: (TermDomain a, Eq a) => a -> a -> Bool
+isSubtypeOf  at1 at2  = joinType at1 at2 == at1
 
 ------------------------------------------------------------------------------
 
@@ -376,10 +377,11 @@ isSubtypeOf  at1 at2  = joinAType at1 at2 == at1
 --- argument variables so that their type is a subtype of the
 --- function call type given in the second argument?
 --- If yes, the specialized argument variable types are returned.
-specializeToRequiredType :: [(Int,AType)] -> ACallType -> Maybe [(Int,AType)]
+specializeToRequiredType :: (TermDomain a, Eq a) => [(Int,a)] -> ACallType a
+                         -> Maybe [(Int,a)]
 specializeToRequiredType _   Nothing    = Nothing
 specializeToRequiredType ats (Just cts) =
-  let newtypes = map (uncurry joinAType) (zip (map snd ats) cts)
+  let newtypes = map (uncurry joinType) (zip (map snd ats) cts)
   in if any (== emptyType) newtypes
        then Nothing
        else Just (zip (map fst ats) newtypes)
