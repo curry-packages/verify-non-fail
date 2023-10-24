@@ -27,6 +27,7 @@ import AbstractCurry.Files  ( readCurry )
 import AbstractCurry.Pretty ( showCProg )
 import AbstractCurry.Select
 import AbstractCurry.Types hiding ( pre )
+import Analysis.TermDomain  ( TermDomain )
 import Contract.Names       ( decodeContractName, encodeContractName )
 import Data.Time            ( ClockTime, compareClockTime )
 import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
@@ -39,7 +40,6 @@ import System.Process       ( system )
 
 import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
-import Verify.Domain        ( domainName )
 import Verify.Helpers
 import Verify.IOTypes
 import Verify.Options
@@ -49,18 +49,18 @@ import Verify.Options
 
 -- Cache directory where data files generated and used by this tool are stored.
 -- If $HOME exists, it is `~/.curryverify_cache/<CURRYSYSTEM>`.
-getVerifyCacheDirectory :: IO String
-getVerifyCacheDirectory = do
+getVerifyCacheDirectory :: String -> IO String
+getVerifyCacheDirectory domainid = do
   homedir    <- getHomeDirectory
   hashomedir <- doesDirectoryExist homedir
   let maindir = if hashomedir then homedir else installDir
-  return $ maindir </> ".curry_verifycache" </> domainName </>
+  return $ maindir </> ".curry_verifycache" </> domainid </>
            joinPath (tail (splitDirectories currySubdir))
 
 --- Delete the tool's cache directory (for the Curry system).
 deleteVerifyCacheDirectory :: Options -> IO ()
 deleteVerifyCacheDirectory opts = do
-  cachedir <- getVerifyCacheDirectory
+  cachedir <- getVerifyCacheDirectory (optDomainID opts)
   exists   <- doesDirectoryExist cachedir
   when exists $ do
     printWhenStatus opts $ "Deleting directory '" ++ cachedir ++ "''..."
@@ -73,9 +73,9 @@ deleteVerifyCacheDirectory opts = do
 --- (first argument) which can be found in the load path are stored.
 --- The second argument is a key for the type of analysis information
 --- which is the suffix of the file name.
-getVerifyCacheBaseFile :: String -> String -> IO String
-getVerifyCacheBaseFile moduleName infotype = do
-  analysisDirectory <- getVerifyCacheDirectory
+getVerifyCacheBaseFile :: Options -> String -> String -> IO String
+getVerifyCacheBaseFile opts moduleName infotype = do
+  analysisDirectory <- getVerifyCacheDirectory (optDomainID opts)
   let modAnaName = moduleName ++ "-" ++ infotype
   (fileDir,_) <- findModuleSourceInLoadPath moduleName
   absfileDir  <- getRealPath fileDir
@@ -97,16 +97,16 @@ getRealPath path = do
   stripSpaces = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 -- Gets the name of the file containing all abstract call types of a module.
-getCallTypesFile :: String -> IO String
-getCallTypesFile mname = getVerifyCacheBaseFile mname "CALLTYPES"
+getCallTypesFile :: Options -> String -> IO String
+getCallTypesFile opts mname = getVerifyCacheBaseFile opts mname "CALLTYPES"
 
 -- Gets the name of the file containing all input/output types of a module.
-getIOTypesFile :: String -> IO String
-getIOTypesFile mname = getVerifyCacheBaseFile mname "IOTYPES"
+getIOTypesFile :: Options -> String -> IO String
+getIOTypesFile opts mname = getVerifyCacheBaseFile opts mname "IOTYPES"
 
 -- Gets the name of the file containing all constructor of a module.
-getConsTypesFile :: String -> IO String
-getConsTypesFile mname = getVerifyCacheBaseFile mname "CONSTYPES"
+getConsTypesFile :: Options -> String -> IO String
+getConsTypesFile opts mname = getVerifyCacheBaseFile opts mname "CONSTYPES"
 
 -- The name of the Curry module where the call type specifications are stored.
 callTypesModule :: String -> String
@@ -119,12 +119,12 @@ storeTypes :: Options -> String -> [[(QName,Int)]]
            -> [(QName,InOutType)]  -- all input output types
            -> IO ()
 storeTypes opts mname allcons acalltypes iotypes = do
-  patfile <- getVerifyCacheBaseFile mname "..."
+  patfile <- getVerifyCacheBaseFile opts mname "..."
   printWhenAll opts $ "Storing analysis results at '" ++ patfile ++ "'"
   createDirectoryIfMissing True (dropFileName patfile)
-  csfile  <- getConsTypesFile  mname
-  ctfile <- getCallTypesFile mname
-  iofile  <- getIOTypesFile    mname
+  csfile  <- getConsTypesFile opts mname
+  ctfile  <- getCallTypesFile opts mname
+  iofile  <- getIOTypesFile   opts mname
   writeFile csfile (show allcons)
   writeFile ctfile
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
@@ -142,9 +142,9 @@ storeTypes opts mname allcons acalltypes iotypes = do
 tryReadTypes :: Options -> String
   -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType)], [(QName,InOutType)]))
 tryReadTypes opts mname = do
-  csfile   <- getConsTypesFile mname
-  ctfile   <- getCallTypesFile mname
-  iofile   <- getIOTypesFile   mname
+  csfile   <- getConsTypesFile opts mname
+  ctfile   <- getCallTypesFile opts mname
+  iofile   <- getIOTypesFile   opts mname
   csexists <- doesFileExist csfile
   ctexists <- doesFileExist ctfile
   ioexists <- doesFileExist iofile
@@ -165,10 +165,10 @@ tryReadTypes opts mname = do
 -- for a given module.
 readTypes :: Options -> String
           -> IO ([[(QName,Int)]], [(QName,ACallType)], [(QName,InOutType)])
-readTypes _ mname = do
-  csfile <- getConsTypesFile mname
-  ctfile <- getCallTypesFile  mname
-  iofile <- getIOTypesFile   mname
+readTypes opts mname = do
+  csfile <- getConsTypesFile opts mname
+  ctfile <- getCallTypesFile opts mname
+  iofile <- getIOTypesFile   opts mname
   conss  <- readFile csfile >>= return . read
   cts    <- readFile ctfile >>= return . map read . lines
   iots   <- readFile iofile >>= return . map read . lines
@@ -181,8 +181,9 @@ readTypes _ mname = do
 --- If some of the data files do not exists or are not newer
 --- than the module source, the operation provided as the second argument
 --- is applied before reading the files.
-readTypesOfModules :: Options -> (Options -> String -> IO ()) -> [String]
-  -> IO ([[(QName,Int)]], [(QName,ACallType)], [(QName,InOutType)])
+readTypesOfModules :: Options
+  -> (Options -> String -> IO ()) -> [String]
+  -> IO ([[(QName,Int)]], [(QName, ACallType)], [(QName, InOutType)])
 readTypesOfModules opts computetypes mnames = do
   (xs,ys,zs) <- mapM tryRead mnames >>= return . unzip3
   return (concat xs, concat ys, concat zs)
@@ -204,7 +205,7 @@ readTypesOfModules opts computetypes mnames = do
 readCallTypeFile :: Options -> ClockTime -> String
                  -> IO (Maybe [(QName,ACallType)])
 readCallTypeFile opts mtimesrc mname = do
-  fname <- getCallTypesFile mname
+  fname <- getCallTypesFile opts mname
   existsf <- doesFileExist fname
   if existsf && not (optRerun opts)
     then do

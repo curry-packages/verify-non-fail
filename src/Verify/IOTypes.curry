@@ -3,7 +3,7 @@
 --- and manipulate such types.
 ---
 --- @author Michael Hanus
---- @version September 2023
+--- @version October 2023
 ------------------------------------------------------------------------------
 
 module Verify.IOTypes

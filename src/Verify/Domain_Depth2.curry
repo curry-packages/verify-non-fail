@@ -22,11 +22,11 @@ import Analysis.ValuesDepthK
 ------------------------------------------------------------------------------
 --- The CASS analysis to approximate result values.
 valueAnalysis :: Analysis AType
-valueAnalysis = resultValueAnalysisTop
+valueAnalysis = resultValueAnalysis2
 
 
 --- The type of the abstract domain.
-type AType = TD.AType
+type AType = TD.DType2
 
 --- Abstract representation of no possible value.
 emptyType :: AType
@@ -65,7 +65,6 @@ consOfType = TD.consOfType
 
 --- The argument types of an abstract type (given as the last argument)
 --- when it matches a given constructor/arity.
---- For the top constructor domain, the arguments have always any type.
 argTypesOfCons :: QName -> Int -> AType -> [AType]
 argTypesOfCons = TD.argTypesOfCons
 

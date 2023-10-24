@@ -17,6 +17,8 @@ import System.Environment         ( getArgs )
 import Debug.Trace ( trace )
 
 -- Imports from dependencies:
+import Analysis.Types             ( Analysis, analysisName )
+--import Analysis.TermDomain
 import Control.Monad.Trans.Class  ( lift )
 import Control.Monad.Trans.State  ( StateT, get, put, execStateT )
 import Data.IORef
@@ -46,13 +48,14 @@ import Verify.Statistics
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 16/10/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 24/10/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
 main = do
   args <- getArgs
-  (opts,progs) <- processOptions banner args
+  (opts',progs) <- processOptions banner args
+  let opts = opts' { optDomainID = analysisName valueAnalysis }
   when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts
   case progs of
     [] -> unless (optDeleteCache opts) $ error "Module name missing"
@@ -112,7 +115,7 @@ verifyModule astore opts mname = do
           (sortFunResults $ if optPublic opts then pubacalltypes
                                               else ntacalltypes)
 
-  rvmap <- analyzeResultValues astore opts flatprog
+  rvmap <- loadAnalysisWithImports astore valueAnalysis opts flatprog
   let iotypes      = map (inOutATypeFunc rvmap) fdecls
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
       pubntiotypes = filter ((`elem` visfuncs) . fst) ntiotypes
@@ -794,6 +797,11 @@ usedFuncsInExpr e =
   fr _ exp = exp
   cas _ exp bs = exp . foldr (.) id bs
   branch _ exp = exp
+
+------------------------------------------------------------------------------
+--- A list of any types of a given length.
+anyTypes :: Int -> [AType]
+anyTypes n = take n (repeat anyType)
 
 ------------------------------------------------------------------------------
 -- Utilities

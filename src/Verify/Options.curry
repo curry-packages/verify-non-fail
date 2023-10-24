@@ -40,13 +40,14 @@ data Options = Options
   , optModule      :: Bool -- generate a `..._CALLTYPES` module?
   , optStats       :: Bool -- show and store statitics?
   , optTime        :: Bool -- show elapsed verification time?
+  , optDomainID    :: String -- the unique id for the abstract term domain
   }
 
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
   Options 1 False "" True False False True False False True False
-          False False False
+          False False False "Values"
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
