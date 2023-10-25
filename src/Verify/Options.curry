@@ -85,6 +85,9 @@ options =
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
            "show call types"
+  , Option "d" ["domain"]
+            (ReqArg checkDomain "<d>")
+            "the analysis domain (Values|Values2|Values5)"
   , Option "" ["delete"]
            (NoArg (\opts -> opts { optDeleteCache = True }))
            ("delete all cache files (for " ++ sysname ++ ")")
@@ -124,6 +127,10 @@ options =
   checkVerb n opts = if n>=0 && n<4
                        then opts { optVerb = n }
                        else error "Illegal verbosity level (try `-h' for help)"
+
+  checkDomain s opts = if s `elem` ["Values", "Values2", "Values5"]
+                         then opts { optDomainID = s }
+                         else error "Illegal domain ID, allowed values: Value|Values2|Values5"
 
   sysname = curryCompiler ++ "-" ++
             intercalate "."

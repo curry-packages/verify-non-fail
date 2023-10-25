@@ -135,8 +135,9 @@ verifyModule astore opts mname = do
         showFunResults showIOT
           (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
 
-  let vstate = initVerifyState fdecls allcons impacalltypes acalltypes
-                               (iotypes ++ impiotypes) opts
+  let vstate = initVerifyState fdecls allcons (Map.fromList impacalltypes)
+                               (Map.fromList acalltypes)
+                               (Map.fromList (iotypes ++ impiotypes)) opts
       funusage = funcDecls2Usage mname (progFuncs flatprog)
   printWhenAll opts $ unlines $
     ("Function usage in module '" ++ mname ++ "':") :
@@ -159,7 +160,7 @@ verifyModule astore opts mname = do
        return (numits, tdiff, st)
      else return (0, 0, vstate)
   -- print statistics:
-  let finalacalltypes   = vstCallTypes vst
+  let finalacalltypes   = Map.toList (vstCallTypes vst)
       finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
       (stattxt,statcsv) = showStatistics opts vtime vnumits visfuncs
                             (length fdecls)
@@ -180,8 +181,8 @@ showFunctionInfo opts mname vst = do
   if qf `notElem` map funcName (vstFuncDecls vst)
     then putStrLn $ "Function '" ++ snd qf ++ "' not defined!"
     else do
-      let ctype = maybe (Just [anyType]) id (lookup qf (vstCallTypes vst))
-          iot   = maybe (trivialInOutType 0) id (lookup qf (vstFuncTypes vst))
+      let ctype = maybe (Just [anyType]) id (Map.lookup qf (vstCallTypes vst))
+          iot   = maybe (trivialInOutType 0) id (Map.lookup qf (vstIOTypes vst))
       putStrLn $ "Function '" ++ f ++ "':"
       putStrLn $ "Call type  : " ++ prettyFunCallAType ctype
       putStrLn $ "In/out type: " ++ showIOT iot
@@ -198,8 +199,8 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
   unless (null newfailures) $ printWhenStatus opts $ unlines $
     "Operations with refined call types (used in future analyses):" :
     showFunResults prettyFunCallAType (reverse newfailures)
-  let st' = st { vstCallTypes = unionBy (\x y -> fst x == fst y) newfailures
-                                         (vstCallTypes st)
+  let st' = st { vstCallTypes = Map.union (Map.fromList newfailures)
+                                          (vstCallTypes st)
                , vstNewFailed = [] }
   if null newfailures
     then do printFailures st'
@@ -237,7 +238,7 @@ showVerifyResult :: Options -> VerifyState -> String -> [FuncDecl] -> IO ()
 showVerifyResult opts vst mname fdecls = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
-                            (vstCallTypes vst)
+                            (Map.toList (vstCallTypes vst))
   if null calltypes || optVerb opts == 0
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
@@ -282,9 +283,9 @@ data VerifyState = VerifyState
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
   , vstVarTypes    :: [VarType]         -- map variable to its abstract types
-  , vstImpCallTypes:: [(QName,ACallType)] -- abstract call types of imports
-  , vstCallTypes   :: [(QName,ACallType)] -- abstract call types of module
-  , vstFuncTypes   :: [(QName,InOutType)]  -- the in/out type for each function
+  , vstImpCallTypes:: Map.Map QName ACallType -- abstract call types of imports
+  , vstCallTypes   :: Map.Map QName ACallType -- abstract call types of module
+  , vstIOTypes     :: Map.Map QName InOutType -- the in/out type for all funcs
   , vstFailedFuncs :: [(QName,Int,Expr)]   -- functions with illegal calls
   , vstPartialBranches :: [(QName,Int,Expr,[QName])] -- incomplete branches
   , vstNewFailed   :: [(QName,ACallType)] -- new failed function call types
@@ -294,8 +295,8 @@ data VerifyState = VerifyState
 
 --- Initializes the verification state.
 initVerifyState :: [FuncDecl] -> [[(QName,Int)]]
-                -> [(QName,ACallType)] -> [(QName,ACallType)]
-                -> [(QName,InOutType)] -> Options
+                -> Map.Map QName ACallType -> Map.Map QName ACallType
+                -> Map.Map QName InOutType -> Options
                 -> VerifyState
 initVerifyState fdecls allcons impacalltypes acalltypes ftypes opts =
   VerifyState fdecls (("",""),0,[]) allcons 0 [] []
@@ -461,9 +462,9 @@ getCallType qf ar
     (maybe (trace ("Warning: call type of operation " ++ show qf ++
                    " not found!") trivialACallType)
            id
-           (lookup qf (vstImpCallTypes st)))
+           (Map.lookup qf (vstImpCallTypes st)))
     id
-    (lookup qf (vstCallTypes st))
+    (Map.lookup qf (vstCallTypes st))
  where
   trivialACallType = Just $ take ar (repeat anyType)
 
@@ -480,7 +481,7 @@ getFuncType qf ar
                    "WARNING: in/out type of '" ++ show qf ++ "' not found!"
                  return $ trivialInOutType ar)
              return
-             (lookup qf (vstFuncTypes st))
+             (Map.lookup qf (vstIOTypes st))
 
 -- Increment number of non-trivial calls.
 incrNonTrivialCall :: VerifyStateM ()
