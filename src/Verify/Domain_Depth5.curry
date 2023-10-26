@@ -17,7 +17,7 @@ import FlatCurry.Types
 
 import Analysis.Types ( Analysis )
 import qualified Analysis.TermDomain as TD
-import Analysis.ValuesDepthK
+import Analysis.Values
 
 ------------------------------------------------------------------------------
 --- The CASS analysis to approximate result values.
