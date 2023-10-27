@@ -23,6 +23,7 @@ import Control.Monad.Trans.Class  ( lift )
 import Control.Monad.Trans.State  ( StateT, get, put, execStateT )
 import Data.IORef
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Debug.Profile
 import FlatCurry.Files
 import FlatCurry.Goodies
@@ -74,8 +75,10 @@ verifyModule astore opts mname = do
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   mtime    <- getModuleModTime mname
   flatprog <- readFlatCurry mname >>= return . transformChoiceInProg
-  let fdecls   = progFuncs flatprog
-      visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
+  let fdecls     = progFuncs flatprog
+      visfuncs   = map funcName (filter ((== Public) . funcVisibility) fdecls)
+      visfuncset = Set.fromList visfuncs
+      isVisible qf = Set.member qf visfuncset
   imps@(impconss,impacalltypes,impiotypes) <-
     if optImports opts
       then do
@@ -91,7 +94,7 @@ verifyModule astore opts mname = do
   let calltypes    = unionBy (\x y -> fst x == fst y) oldpubcalltypes
                              (map (callTypeFunc opts allcons) fdecls)
       ntcalltypes  = filter (not . isTotalCallType . snd) calltypes
-      pubcalltypes = filter ((`elem` visfuncs) . fst) ntcalltypes
+      pubcalltypes = filter (isVisible . fst) ntcalltypes
   if optVerb opts > 2
     then putStrLn $ unlines $ "CONCRETE CALL TYPES OF ALL OPERATIONS:" :
            showFunResults prettyFunCallTypes calltypes
@@ -109,7 +112,7 @@ verifyModule astore opts mname = do
                                   id
                                   mboldacalltypes)
       ntacalltypes  = filter (not . isTotalACallType . snd) acalltypes
-      pubacalltypes = filter ((`elem` visfuncs) . fst) ntacalltypes
+      pubacalltypes = filter (isVisible . fst) ntacalltypes
   if optVerb opts > 2
     then putStrLn $ unlines $ "ABSTRACT CALL TYPES OF ALL OPERATIONS:" :
            showFunResults prettyFunCallAType acalltypes
@@ -124,7 +127,7 @@ verifyModule astore opts mname = do
   rvmap <- loadAnalysisWithImports astore valueAnalysis opts flatprog
   let iotypes      = map (inOutATypeFunc rvmap) fdecls
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
-      pubntiotypes = filter ((`elem` visfuncs) . fst) ntiotypes
+      pubntiotypes = filter (isVisible . fst) ntiotypes
   if optVerb opts > 2
     then putStrLn $ unlines $ "INPUT/OUTPUT TYPES OF ALL OPERATIONS:" :
            showFunResults showIOT iotypes
@@ -152,7 +155,7 @@ verifyModule astore opts mname = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       showVerifyResult opts st mname fdecls
+       showVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -162,8 +165,8 @@ verifyModule astore opts mname = do
   -- print statistics:
   let finalacalltypes   = Map.toList (vstCallTypes vst)
       finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
-      (stattxt,statcsv) = showStatistics opts vtime vnumits visfuncs
-                            (length fdecls)
+      (stattxt,statcsv) = showStatistics opts vtime vnumits isVisible
+                            (length visfuncs) (length fdecls)
                             (length pubntiotypes, length ntiotypes)
                             (length pubacalltypes, length ntacalltypes)
                             finalntacalltypes (vstStats vst)
@@ -234,8 +237,8 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
            (map (\ (qf,_,e,cs) -> showIncompleteBranch qf e cs)
                 (reverse (vstPartialBranches st)) ++ [failLine])
 
-showVerifyResult :: Options -> VerifyState -> String -> [FuncDecl] -> IO ()
-showVerifyResult opts vst mname fdecls = do
+showVerifyResult :: Options -> VerifyState -> String -> (QName -> Bool) -> IO ()
+showVerifyResult opts vst mname isvisible = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
                             (Map.toList (vstCallTypes vst))
@@ -244,9 +247,7 @@ showVerifyResult opts vst mname fdecls = do
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
            : showFunResults prettyFunCallAType (sortFunResults calltypes)
  where
-  showFun qf = not (optPublic opts) || qf `elem` visfuncs
-
-  visfuncs = map funcName (filter ((== Public) . funcVisibility) fdecls)
+  showFun qf = not (optPublic opts) || isvisible qf
 
 -- Shows a message about an incomplete branch.
 -- If the third argument is the empty list, it is a literal branch.

@@ -27,11 +27,11 @@ statsFile :: String -> String
 statsFile mname = mname ++ "-STATISTICS"
 
 -- Show statistics in textual and in CSV format:
-showStatistics :: TermDomain a => Options -> Int -> Int -> [QName]
-               -> Int -> (Int,Int)
+showStatistics :: TermDomain a => Options -> Int -> Int -> (QName -> Bool)
+               -> Int -> Int -> (Int,Int)
                -> (Int,Int) -> [(QName, ACallType a)]
                -> (Int,Int) -> (String, [String])
-showStatistics opts vtime numits visfuncs numallfuncs
+showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
                (numpubiotypes, numalliotypes)
                (numpubcalltypes, numallcalltypes)
                ntfinalcts (numcalls, numcases) =
@@ -63,8 +63,7 @@ showStatistics opts vtime numits visfuncs numallfuncs
              , numcalls, numcases, numits, vtime ]
   )
  where
-  numvisfuncs      = length visfuncs
-  ntfinalpubcts    = filter ((`elem` visfuncs) . fst) ntfinalcts
+  ntfinalpubcts    = filter (isvisible . fst) ntfinalcts
   numntfinalpubcts = length ntfinalpubcts
   numntfinalcts    = length ntfinalcts
   numfailpubcts    = length (filter (isFailACallType . snd) ntfinalpubcts)
