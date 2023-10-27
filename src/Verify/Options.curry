@@ -23,6 +23,7 @@ import Numeric               ( readNat )
 import System.Console.GetOpt
 
 import System.CurryPath      ( stripCurrySuffix )
+import System.IO             ( hFlush, stdout )
 import System.Process        ( exitWith )
 
 data Options = Options
@@ -155,6 +156,7 @@ printWhenAll opts s =
  when (optVerb opts > 2) (printWT s)
 
 printWT :: String -> IO ()
-printWT s = putStrLn $ s --"NON-FAILING ANALYSIS: " ++ s
+printWT s = do putStrLn $ s --"NON-FAIL INFERENCE: " ++ s
+               hFlush stdout
 
 ---------------------------------------------------------------------------

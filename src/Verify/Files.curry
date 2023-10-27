@@ -114,25 +114,32 @@ callTypesModule mname = mname ++ "_CALLTYPES"
 
 ------------------------------------------------------------------------------
 -- Stores call types and input/output types for a module.
-storeTypes :: (TermDomain a, Show a) => Options -> String -> [[(QName,Int)]]
+storeTypes :: (TermDomain a, Show a) => Options
+           -> String                 -- module name
+           -> [[(QName,Int)]]        -- all constructors grouped by type
            -> [(QName,ACallType a)]  -- all inferred abstract call types
            -> [(QName,InOutType a)]  -- all input output types
            -> IO ()
 storeTypes opts mname allcons acalltypes iotypes = do
   patfile <- getVerifyCacheBaseFile opts mname "..."
-  printWhenAll opts $ "Storing analysis results at '" ++ patfile ++ "'"
+  printWhenAll opts $ "Caching analysis results at '" ++ patfile ++ "'"
   createDirectoryIfMissing True (dropFileName patfile)
   csfile  <- getConsTypesFile opts mname
   ctfile  <- getCallTypesFile opts mname
   iofile  <- getIOTypesFile   opts mname
-  writeFile csfile (show allcons)
-  writeFile ctfile
+  writeFileAndReport csfile (show allcons)
+  writeFileAndReport ctfile
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
-  writeFile iofile
+  writeFileAndReport iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
   --when (optModule opts) $
   --  writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
  where
+  writeFileAndReport f s = do
+    when (optVerb opts > 2) $ putStr $ "Writing cache file '" ++ f ++ "'..."
+    writeFile f s
+    printWhenAll opts "done"
+  
   filterMod xs = filter (\ ((mn,_),_) -> mn == mname) xs
 
 -- Try to read constructors, call types, and

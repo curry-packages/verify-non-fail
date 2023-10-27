@@ -74,7 +74,12 @@ showStatistics opts vtime numits visfuncs numallfuncs
 --- (if required by the current options).
 storeStatistics :: Options -> String -> String -> [String] -> IO ()
 storeStatistics opts mname stattxt statcsv = when (optStats opts) $ do
-    writeFile    (statsFile mname ++ ".txt") stattxt
-    writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
+  reportWriting writeFile    (statsFile mname ++ ".txt") stattxt
+  reportWriting writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
+ where
+  reportWriting wf f s = do
+    when (optVerb opts > 2) $ putStr $ "Storing statistics in '" ++ f ++ "'..."
+    wf f s
+    printWhenAll opts "done"
 
 ------------------------------------------------------------------------------
