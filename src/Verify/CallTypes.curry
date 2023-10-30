@@ -330,7 +330,7 @@ isTotalACallType :: (TermDomain a, Eq a) => ACallType a -> Bool
 isTotalACallType Nothing    = False
 isTotalACallType (Just ats) = all (== anyType) ats
 
----- The call type of an operation which has no non-failing arguments
+--- The call type of an operation which has no non-failing arguments
 --- expressible by call types for the arguments.
 failACallType :: TermDomain a => ACallType a
 failACallType = Nothing

@@ -49,7 +49,7 @@ import Verify.Statistics
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 24/10/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 30/10/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -73,11 +73,12 @@ type ACallType = Verify.CallTypes.ACallType AType
 verifyModule :: IORef (AnalysisStore AType) -> Options -> String -> IO ()
 verifyModule astore opts mname = do
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
-  mtime    <- getModuleModTime mname
   flatprog <- readFlatCurry mname >>= return . transformChoiceInProg
-  let fdecls     = progFuncs flatprog
-      visfuncs   = map funcName (filter ((== Public) . funcVisibility) fdecls)
-      visfuncset = Set.fromList visfuncs
+  let fdecls       = progFuncs flatprog
+      numfdecls    = length fdecls
+      visfuncs     = map funcName (filter ((== Public) . funcVisibility) fdecls)
+      numvisfuncs  = length visfuncs
+      visfuncset   = Set.fromList visfuncs
       isVisible qf = Set.member qf visfuncset
   imps@(impconss,impacalltypes,impiotypes) <-
     if optImports opts
@@ -89,8 +90,63 @@ verifyModule astore opts mname = do
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
                   else printWhenStatus opts ""
-  let allcons = allConsOfTypes (progTypes flatprog) ++ impconss
+  let modcons = allConsOfTypes (progTypes flatprog)
+      allcons = modcons ++ impconss
+  -- infer initial abstract call types:
+  (acalltypes, numntacalltypes, numpubacalltypes) <- id $!!  
+    inferCallTypes opts allcons isVisible mname flatprog
+  -- infer in/out types:
+  (iotypes, numntiotypes, numpubntiotypes) <- id $!!
+    inferIOTypes opts astore isVisible flatprog
+
+  let vstate = initVerifyState fdecls allcons (Map.fromList impacalltypes)
+                               (Map.fromList acalltypes)
+                               (Map.fromList (iotypes ++ impiotypes)) opts
+      funusage = funcDecls2Usage mname (progFuncs flatprog)
+  printWhenAll opts $ unlines $
+    ("Function usage in module '" ++ mname ++ "':") :
+    map (\ (qf, qfs) -> snd qf ++ ": used in " ++
+                        unwords (map (snd . funcName) qfs))
+        (Map.toList funusage)
+  (vnumits, vtime, vst) <-
+   if optVerify opts
+     then do
+       printWhenStatus opts $ "Start verification of '" ++ mname ++ "' (" ++
+         show numfdecls ++ " functions):"
+       pi1 <- getProcessInfos
+       (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
+       pi2 <- getProcessInfos
+       showVerifyResult opts st mname isVisible
+       let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
+                   maybe 0 id (lookup ElapsedTime pi1)
+       when (optTime opts) $ putStrLn $
+         "TOTAL VERIFICATION TIME: " ++ show tdiff ++ " msec"
+       return (numits, tdiff, st)
+     else return (0, 0, vstate)
+  -- print statistics:
+  let finalacalltypes   = Map.toList (vstCallTypes vst)
+      finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
+      (stattxt,statcsv) = showStatistics opts vtime vnumits isVisible
+                            numvisfuncs numfdecls
+                            (numpubntiotypes, numntiotypes)
+                            (numpubacalltypes, numntacalltypes)
+                            finalntacalltypes (vstStats vst)
+  when (optStats opts) $ putStr stattxt
+  when (optVerify opts) $ do
+    storeTypes opts mname modcons finalacalltypes iotypes
+    storeStatistics opts mname stattxt statcsv
+  unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
+
+--- Infer the initial (abstract) call types of all functions in a program and
+--- return them together with the number of all/public non-trivial call types.
+inferCallTypes :: Options
+               -> [[(QName,Int)]]
+               -> (QName -> Bool) -> String -> Prog
+               -> IO ([(QName, ACallType)], Int, Int)
+inferCallTypes opts allcons isVisible mname flatprog = do
+  mtime    <- getModuleModTime mname
   oldpubcalltypes <- readPublicCallTypeModule opts allcons mtime mname
+  let fdecls       = progFuncs flatprog
   let calltypes    = unionBy (\x y -> fst x == fst y) oldpubcalltypes
                              (map (callTypeFunc opts allcons) fdecls)
       ntcalltypes  = filter (not . isTotalCallType . snd) calltypes
@@ -123,9 +179,17 @@ verifyModule astore opts mname = do
         showFunResults prettyFunCallAType
           (sortFunResults $ if optPublic opts then pubacalltypes
                                               else ntacalltypes)
+  return (acalltypes, length ntacalltypes, length pubacalltypes)
 
+--- Infer the in/out types of all functions in a program and return them
+--- together with the number of all and public non-trivial in/out types.
+inferIOTypes :: Options
+             -> IORef (AnalysisStore AType)
+             -> (QName -> Bool) -> Prog
+             -> IO ([(QName, InOutType)], Int, Int)
+inferIOTypes opts astore isVisible flatprog = do
   rvmap <- loadAnalysisWithImports astore valueAnalysis opts flatprog
-  let iotypes      = map (inOutATypeFunc rvmap) fdecls
+  let iotypes      = map (inOutATypeFunc rvmap) (progFuncs flatprog)
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
       pubntiotypes = filter (isVisible . fst) ntiotypes
   if optVerb opts > 2
@@ -137,45 +201,7 @@ verifyModule astore opts mname = do
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
         showFunResults showIOT
           (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
-
-  let vstate = initVerifyState fdecls allcons (Map.fromList impacalltypes)
-                               (Map.fromList acalltypes)
-                               (Map.fromList (iotypes ++ impiotypes)) opts
-      funusage = funcDecls2Usage mname (progFuncs flatprog)
-  printWhenAll opts $ unlines $
-    ("Function usage in module '" ++ mname ++ "':") :
-    map (\ (qf, qfs) -> snd qf ++ ": used in " ++
-                        unwords (map (snd . funcName) qfs))
-        (Map.toList funusage)
-  (vnumits, vtime, vst) <-
-   if optVerify opts
-     then do
-       printWhenStatus opts $ "Start verification of '" ++ mname ++ "' (" ++
-         show (length fdecls) ++ " functions):"
-       pi1 <- getProcessInfos
-       (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
-       pi2 <- getProcessInfos
-       showVerifyResult opts st mname isVisible
-       let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
-                   maybe 0 id (lookup ElapsedTime pi1)
-       when (optTime opts) $ putStrLn $
-         "TOTAL VERIFICATION TIME: " ++ show tdiff ++ " msec"
-       return (numits, tdiff, st)
-     else return (0, 0, vstate)
-  -- print statistics:
-  let finalacalltypes   = Map.toList (vstCallTypes vst)
-      finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
-      (stattxt,statcsv) = showStatistics opts vtime vnumits isVisible
-                            (length visfuncs) (length fdecls)
-                            (length pubntiotypes, length ntiotypes)
-                            (length pubacalltypes, length ntacalltypes)
-                            finalntacalltypes (vstStats vst)
-  when (optStats opts) $ putStr stattxt
-  when (optVerify opts) $ do
-    storeTypes opts mname (allConsOfTypes (progTypes flatprog))
-               finalacalltypes iotypes
-    storeStatistics opts mname stattxt statcsv
-  unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
+  return (iotypes, length ntiotypes, length pubntiotypes)
 
 showFunctionInfo :: Options -> String -> VerifyState -> IO ()
 showFunctionInfo opts mname vst = do
@@ -202,9 +228,8 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
   unless (null newfailures) $ printWhenStatus opts $ unlines $
     "Operations with refined call types (used in future analyses):" :
     showFunResults prettyFunCallAType (reverse newfailures)
-  let st' = st { vstCallTypes = Map.union (Map.fromList newfailures)
-                                          (vstCallTypes st)
-               , vstNewFailed = [] }
+  let newcts = Map.union (Map.fromList newfailures) (vstCallTypes st)
+  let st' = st { vstCallTypes = newcts, vstNewFailed = [] }
   if null newfailures
     then do printFailures st'
             return (numits + 1, st')
@@ -284,9 +309,9 @@ data VerifyState = VerifyState
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
   , vstVarTypes    :: [VarType]         -- map variable to its abstract types
-  , vstImpCallTypes:: Map.Map QName ACallType -- abstract call types of imports
-  , vstCallTypes   :: Map.Map QName ACallType -- abstract call types of module
-  , vstIOTypes     :: Map.Map QName InOutType -- the in/out type for all funcs
+  , vstImpCallTypes:: Map.Map QName ACallType -- call types of imports
+  , vstCallTypes   :: Map.Map QName ACallType -- call types of module
+  , vstIOTypes     :: Map.Map QName InOutType -- in/out type for all funcs
   , vstFailedFuncs :: [(QName,Int,Expr)]   -- functions with illegal calls
   , vstPartialBranches :: [(QName,Int,Expr,[QName])] -- incomplete branches
   , vstNewFailed   :: [(QName,ACallType)] -- new failed function call types
@@ -459,13 +484,15 @@ getCallType qf ar
   | otherwise
   = do
   st <- get
-  return $ maybe
-    (maybe (trace ("Warning: call type of operation " ++ show qf ++
-                   " not found!") trivialACallType)
-           id
-           (Map.lookup qf (vstImpCallTypes st)))
-    id
-    (Map.lookup qf (vstCallTypes st))
+  return $
+    if qf == pre "error" && optError (vstToolOpts st)
+      then failACallType
+      else maybe (maybe (trace ("Warning: call type of operation " ++
+                                show qf ++ " not found!") trivialACallType)
+                        id
+                        (Map.lookup qf (vstImpCallTypes st)))
+                 id
+                 (Map.lookup qf (vstCallTypes st))
  where
   trivialACallType = Just $ take ar (repeat anyType)
 
@@ -531,13 +558,17 @@ verifyFuncRule vs exp = do
   setVarExps  (map (\v -> (v, Var v)) vs)
   qf <- getCurrentFuncName
   printIfVerb 2 $ "CHECKING FUNCTION " ++ snd qf
-  ctype <- getCallType qf (length vs)
-  maybe (printIfVerb 2 $ "not checked since marked as always failing")
-        (\atargs -> do
-           setVarTypes (map (\(v,at) -> (v, IOT [([],at)], [])) (zip vs atargs))
-           showVarExpTypes
-           verifyExpr True exp
-           return ())
+  ctype    <- getCallType qf (length vs)
+  rhstypes <- mapM (\f -> getCallType f 0) (funcsInExpr exp)
+  if all isTotalACallType (ctype:rhstypes)
+   then printIfVerb 2 $ "not checked since trivial"
+   else maybe (printIfVerb 2 $ "not checked since marked as always failing")
+             (\atargs -> do
+                setVarTypes (map (\(v,at) -> (v, IOT [([],at)], []))
+                            (zip vs atargs))
+                showVarExpTypes
+                verifyExpr True exp
+                return ())
         ctype
   printIfVerb 2 $ take 70 (repeat '-')
 
@@ -790,21 +821,7 @@ usedFuncsInFunc = usedFuncsInRule . funcRule
 
 --- Get function names used in the right-hand side of a rule.
 usedFuncsInRule :: Rule -> [QName]
-usedFuncsInRule = trRule (\_ body -> usedFuncsInExpr body) (\_ -> [])
-
---- Get function names used in an expression.
-usedFuncsInExpr :: Expr -> [QName]
-usedFuncsInExpr e =
-  trExpr (const id) (const id) comb lt fr (.) cas branch const e []
- where
-  comb ct qn = foldr (.) (combtype ct qn)
-  combtype ct qn = case ct of FuncCall       -> (qn:)
-                              FuncPartCall _ -> (qn:)
-                              _              -> id
-  lt bs exp = exp . foldr (.) id (map (\ (_,ns) -> ns) bs)
-  fr _ exp = exp
-  cas _ exp bs = exp . foldr (.) id bs
-  branch _ exp = exp
+usedFuncsInRule = trRule (\_ body -> funcsInExpr body) (\_ -> [])
 
 ------------------------------------------------------------------------------
 --- A list of any types of a given length.

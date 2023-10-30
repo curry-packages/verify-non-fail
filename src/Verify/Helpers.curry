@@ -97,7 +97,7 @@ allConsOfTypes tdecls = filter (not . null) (map toConss tdecls)
   toConss (TypeSyn _ _ _ _)      = []
   toConss (TypeNew _ _ _ (NewCons qc _ _)) = [(qc,1)]
 
--- Reads a (possibly" qualified constructor string.
+-- Reads a (possibly) qualified constructor string.
 readQC :: String -> QName
 readQC = readMQC []
  where
@@ -110,6 +110,21 @@ readQC = readMQC []
                                   else (toMod (ms ++ [s1]), c:cs)
 
   toMod = intercalate "."
+
+------------------------------------------------------------------------------
+--- Returns the qualified names of all functions occurring in an expression.
+funcsInExpr :: Expr -> [QName]
+funcsInExpr e =
+  trExpr (const id) (const id) comb lt fr (.) cas branch const e []
+ where
+  comb ct qn = foldr (.) (combtype ct qn)
+  combtype ct qn = case ct of FuncCall       -> (qn:)
+                              FuncPartCall _ -> (qn:)
+                              _              -> id
+  lt bs exp = exp . foldr (.) id (map (\ (_,ns) -> ns) bs)
+  fr _ exp = exp
+  cas _ exp bs = exp . foldr (.) id bs
+  branch _ exp = exp
 
 ------------------------------------------------------------------------------
 --- A position in a term is represented as list of integers.
