@@ -114,7 +114,7 @@ callTypesModule mname = mname ++ "_CALLTYPES"
 
 ------------------------------------------------------------------------------
 -- Stores call types and input/output types for a module.
-storeTypes :: (TermDomain a, Show a) => Options
+storeTypes :: TermDomain a => Options
            -> String                 -- module name
            -> [[(QName,Int)]]        -- all constructors grouped by type
            -> [(QName,ACallType a)]  -- all inferred abstract call types
@@ -146,7 +146,7 @@ storeTypes opts mname allcons acalltypes iotypes = do
 -- input/output types for a given module.
 -- If the data files do not exist or are older than the source of the
 -- module, `Nothing` is returned.
-tryReadTypes :: (TermDomain a, Read a) => Options -> String
+tryReadTypes :: TermDomain a => Options -> String
   -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType a)], [(QName,InOutType a)]))
 tryReadTypes opts mname = do
   csfile   <- getConsTypesFile opts mname
@@ -170,7 +170,7 @@ tryReadTypes opts mname = do
 
 -- Reads constructors, abstract call types, and input/output types
 -- for a given module.
-readTypes :: (TermDomain a, Read a) => Options -> String
+readTypes :: TermDomain a => Options -> String
           -> IO ([[(QName,Int)]], [(QName,ACallType a)], [(QName,InOutType a)])
 readTypes opts mname = do
   csfile <- getConsTypesFile opts mname
@@ -188,7 +188,7 @@ readTypes opts mname = do
 --- If some of the data files do not exists or are not newer
 --- than the module source, the operation provided as the second argument
 --- is applied before reading the files.
-readTypesOfModules :: (TermDomain a, Read a) => Options
+readTypesOfModules :: TermDomain a => Options
   -> (Options -> String -> IO ()) -> [String]
   -> IO ([[(QName,Int)]], [(QName, ACallType a)], [(QName, InOutType a)])
 readTypesOfModules opts computetypes mnames = do
@@ -209,7 +209,7 @@ readTypesOfModules opts computetypes mnames = do
 --- Reads the possibly previously inferred abstract call types for a
 --- given module if it is up-to-date (where the modification time
 --- of the module is passed as the second argument).
-readCallTypeFile :: (TermDomain a, Read a) => Options -> ClockTime -> String
+readCallTypeFile :: TermDomain a => Options -> ClockTime -> String
                  -> IO (Maybe [(QName,ACallType a)])
 readCallTypeFile opts mtimesrc mname = do
   fname <- getCallTypesFile opts mname

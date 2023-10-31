@@ -41,7 +41,7 @@ trivialInOutType :: TermDomain a => Int -> InOutType a
 trivialInOutType ar = IOT [(take ar (repeat anyType), anyType)]
 
 -- Is the InOutType a general one, i.e., a mapping from Any's to Any?
-isAnyIOType :: (TermDomain a, Eq a) => InOutType a -> Bool
+isAnyIOType :: TermDomain a => InOutType a -> Bool
 isAnyIOType (IOT iots) = case iots of
   [(ioargs,iores)] -> all (== anyType) (iores : ioargs)
   _                -> False
@@ -59,7 +59,7 @@ valuesOfIOT (IOT iotypes) = foldr lubType emptyType (map snd iotypes)
 --- Normalize InOutTypes by
 --- * removing alternatives with empty output type
 --- * joining results of IOTypes with identical arguments
-normalizeIOT :: (TermDomain a, Eq a) => InOutType a -> InOutType a
+normalizeIOT :: TermDomain a => InOutType a -> InOutType a
 normalizeIOT (IOT iotypes) =
   IOT (joinOuts (filter ((/= emptyType) . snd) iotypes))
  where
@@ -130,7 +130,7 @@ initInOutTypeState qf vs resval =
 
 --- Compute the in/out type for a function declaration w.r.t. a given
 --- assignment of function names to result types.
-inOutATypeFunc :: (TermDomain a, Eq a) => (QName -> a) -> FuncDecl
+inOutATypeFunc :: TermDomain a => (QName -> a) -> FuncDecl
                -> (QName,InOutType a)
 inOutATypeFunc resval (Func qf ar _ _ rule) = case rule of
   Rule vs exp -> if length vs /= ar
@@ -228,7 +228,7 @@ showArgumentVars argvs =
   "(" ++ intercalate "," (map (\v -> 'v' : show v) argvs) ++ ")"
 
 --- Simplify a set of input/output variable types.
-simplifyVarTypes :: (TermDomain a, Eq a) => [VarType a] -> [VarType a]
+simplifyVarTypes :: TermDomain a => [VarType a] -> [VarType a]
 simplifyVarTypes = simpDefVarTypes []
  where
   simpDefVarTypes defts vartypes =
@@ -285,7 +285,7 @@ simplifyVarTypes = simpDefVarTypes []
 
 --- Adds the binding of a variable to an abstract type (the representation
 --- of a constructor) to the set of input/output types for variables.
-bindVarInIOTypes :: (TermDomain a, Eq a) => Int -> a -> [VarType a]
+bindVarInIOTypes :: TermDomain a => Int -> a -> [VarType a]
                  -> [VarType a]
 bindVarInIOTypes var vatype = map bindVar
  where

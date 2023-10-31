@@ -472,7 +472,7 @@ removeVarAnyType v = do
   put $ st { vstVarTypes = filter (not . isAnyTypeForV) (vstVarTypes st) }
  where
   isAnyTypeForV (var,vt,vs) = var == v &&
-    case (vt,vs) of (IOT [([], at)], []) -> at == anyType
+    case (vt,vs) of (IOT [([], at)], []) -> isAnyType at
                     _                    -> False
 
 -- Gets the abstract call type for a given operation.
@@ -767,7 +767,7 @@ verifyBranch :: Int -> Int -> BranchExpr
 verifyBranch casevar ve (Branch (LPattern l)    e) = do
   vts <- getVarTypes
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
-  if getVarType casevar branchvartypes == emptyType
+  if isEmptyType (getVarType casevar branchvartypes)
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
             iots <- verifyVarExpr ve e
@@ -779,7 +779,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   let pattype        = aCons qc (anyTypes (length vs))
       branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar pattype vts)
       casevartype    = getVarType casevar branchvartypes
-  if casevartype == emptyType
+  if isEmptyType casevartype
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
             mapM_ (\(v,t) -> addVarType (ioVarType v t))

@@ -8,7 +8,7 @@
 
 module Verify.Domain
   ( valueAnalysis
-  , AType, emptyType, anyType, aCons, aLit, litAsCons
+  , AType, emptyType, isEmptyType, anyType, isAnyType, aCons, aLit, litAsCons
   , consOfType, argTypesOfCons, joinType, lubType, showType
   )
  where
@@ -32,9 +32,17 @@ type AType = TD.AType
 emptyType :: AType
 emptyType = TD.emptyType
 
+--- Does an abstract type represent no value?
+isEmptyType :: AType -> Bool
+isEmptyType = TD.isEmptyType
+
 --- Abstract representation of the type of all values.
 anyType :: AType
 anyType = TD.anyType
+
+--- Does an abstract type represent any value?
+isAnyType :: AType -> Bool
+isAnyType = TD.isAnyType
 
 --- Least upper bound of abstract values.
 lubType :: AType -> AType -> AType
