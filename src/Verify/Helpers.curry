@@ -187,14 +187,16 @@ stdConstructors =
 
 --- Is this the name of a non-failing encapsulated search operation?
 isEncSearchOp :: QName -> Bool
-isEncSearchOp qf =
+isEncSearchOp qf@(mn,_) =
+  mn `elem` ["Control.Search.Unsafe", "Control.Search.AllValues"] ||
   qf `elem` map (\n -> ("Control.AllValues",n))
                 ["allValues", "oneValue", "isFail"]
 
 --- Is this the name of a set function?
 isSetFunOp :: QName -> Bool
 isSetFunOp (mn,fn) =
-  mn == "Control.SetFunctions" && take 3 fn == "set" &&
+  (mn == "Control.Search.SetFunctions" || mn == "Control.SetFunctions") &&
+  take 3 fn == "set" &&
   all isDigit (drop 3 fn)
 
 ------------------------------------------------------------------------------
