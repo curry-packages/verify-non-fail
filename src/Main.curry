@@ -144,7 +144,7 @@ inferCallTypes :: Options
                -> (QName -> Bool) -> String -> Prog
                -> IO ([(QName, ACallType)], Int, Int)
 inferCallTypes opts allcons isVisible mname flatprog = do
-  mtime    <- getModuleModTime mname
+  mtime           <- getModuleModTime mname
   oldpubcalltypes <- readPublicCallTypeModule opts allcons mtime mname
   let fdecls       = progFuncs flatprog
   let calltypes    = unionBy (\x y -> fst x == fst y) oldpubcalltypes
@@ -629,7 +629,7 @@ verifyVarExpr ve exp = case exp of
                        -- instead of copying the current types for v to ve:
                        return $ map (\ (_,iots,vs) -> (ve,iots,vs)) vtypes
   Lit l         -> return [(ve, IOT [([], aLit l)], [])]
-  Comb ct qf es -> do
+  Comb ct qf es -> checkDivOpNonZero exp $ do
     vs <- if isEncSearchOp qf
             then -- for encapsulated search, failures in arguments are hidden
                  mapM (verifyExpr False) es
@@ -724,6 +724,37 @@ verifyFuncCall errorfail exp qf vs
                     (specializeToRequiredType vts atype)
  where
   printVATypes = intercalate ", " . map (\ (v,t) -> show v ++ '/' : showType t)
+
+-- Auxiliary operation to support specific handling of applying some division
+-- operation to non-zero integer constants. If the expression is a call
+-- to a `div` or `mod` operation where the second argument is a non-zero
+-- constant, return just the first argument, otherwise `Nothing`.
+-- This is specific to the current implementation of div/mod where a call
+-- like `div e n` is translated into the FlatCurry expression
+-- `apply (apply Prelude._impl#div#Prelude.Integral#Prelude.Int e) n`
+checkDivOpNonZero :: Expr -> VerifyStateM [VarType] -> VerifyStateM [VarType]
+checkDivOpNonZero exp cont = case exp of
+  Comb FuncCall ap1 [ Comb FuncCall ap2 [Comb FuncCall dm _, arg1], nexp]
+      | ap1 == apply && ap2 == apply && dm `elem` divops && isNonZero nexp
+    -> do verifyExpr True arg1
+          return []
+  _ -> cont
+ where
+  isNonZero e = case e of
+    Lit (Intc i) -> i /= 0  -- a non-zero literal
+    Comb FuncCall ap [ Comb FuncCall fromint _ , nexp] 
+      -> ap == apply && fromint == pre "fromInt" && isNonZero nexp -- fromInt ..
+    _            -> False
+
+  apply = pre "apply"
+
+  divops =
+    map pre [ "_impl#div#Prelude.Integral#Prelude.Int"
+            , "_impl#mod#Prelude.Integral#Prelude.Int"
+            , "_impl#quot#Prelude.Integral#Prelude.Int"
+            , "_impl#rem#Prelude.Integral#Prelude.Int"
+            , "div", "mod", "quot", "rem" ]
+
 
 -- Verify whether missing branches exists and are not reachable.
 verifyMissingBranches :: Expr -> Int -> [BranchExpr] -> VerifyStateM ()

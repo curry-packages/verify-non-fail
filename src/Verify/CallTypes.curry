@@ -204,9 +204,11 @@ callTypeFunc opts allcons (Func qf ar _ _ rule) =
 defaultCallTypes :: [(QName,[[CallType]])]
 defaultCallTypes =
   map (\qf -> (pre qf, failCallType))
-      [ "=:=", "=:<=", "=:<<=", "divFloat", "prim_divFloat"
-      , "divInt", "prim_divInt", "modInt", "prim_modInt"
-      , "quotInt", "prim_quotInt", "remInt", "prim_remInt"
+      [ "=:=", "=:<=", "=:<<="
+      , "div", "divFloat", "prim_divFloat", "divInt", "prim_divInt"
+      , "mod", "modInt", "prim_modInt"
+      , "quot", "quotInt", "prim_quotInt"
+      , "rem", "remInt", "prim_remInt"
       , "sqrtFloat", "prim_sqrtFloat"
       ] ++
   [ (pre "&",   [[MCons [(pre "True",[])], MCons [(pre "True",[])]]])
@@ -359,7 +361,7 @@ joinACallType (Just ats1) (Just ats2) =
 
 --- Is a list of abstract call types (first argument) a subtype of
 --- the call type of an operation (second argument)?
-subtypeOfRequiredCallType :: (TermDomain a, Eq a) => [a] -> ACallType a -> Bool
+subtypeOfRequiredCallType :: TermDomain a => [a] -> ACallType a -> Bool
 subtypeOfRequiredCallType _   Nothing     = False
 subtypeOfRequiredCallType ats (Just rats) =
   all (uncurry isSubtypeOf) (zip ats rats)
@@ -367,7 +369,7 @@ subtypeOfRequiredCallType ats (Just rats) =
  --- Is an abstract type `at1` a subtype of another abstract type `at2`?
  --- Thus, are all values described by `at1` contained in the set of
  --- values described by `at2`?
-isSubtypeOf :: (TermDomain a, Eq a) => a -> a -> Bool
+isSubtypeOf :: TermDomain a => a -> a -> Bool
 isSubtypeOf  at1 at2  = joinType at1 at2 == at1
 
 ------------------------------------------------------------------------------
