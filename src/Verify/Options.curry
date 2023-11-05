@@ -85,11 +85,13 @@ options =
            "show types for all (also private) operations"
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
-           "show call types"
-  , Option "d" ["domain"]
-            (ReqArg checkDomain "<d>")
-            "the analysis domain (Values|Values2|Values5)"
-  , Option "" ["delete"]
+           "show call types" ] ++
+  (if curryCompiler == "kics2"
+     then [] -- no option `--domain` for KiCS2
+     else [ Option "d" ["domain"]
+                   (ReqArg checkDomain "<d>")
+                   "the analysis domain (Values|Values2|Values5)" ]) ++
+  [ Option "" ["delete"]
            (NoArg (\opts -> opts { optDeleteCache = True }))
            ("delete all cache files (for " ++ sysname ++ ")")
   , Option "e" ["error"]
