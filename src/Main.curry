@@ -81,7 +81,7 @@ main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
 --- Verify a single module.
 verifyModule :: TermDomain a => Analysis a -> IORef (AnalysisStore a)
              -> Options -> String -> IO ()
-verifyModule valueAnalysis astore opts mname = do
+verifyModule valueanalysis astore opts mname = do
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- readFlatCurry mname >>= return . transformChoiceInProg
   let fdecls       = progFuncs flatprog
@@ -95,7 +95,7 @@ verifyModule valueAnalysis astore opts mname = do
       then do
         whenStatus opts $ putStr $
           "Reading abstract types of imports: " ++ unwords (progImports flatprog)
-        readTypesOfModules opts (verifyModule valueAnalysis astore)
+        readTypesOfModules opts (verifyModule valueanalysis astore)
                            (progImports flatprog)
       else return ([],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
@@ -108,7 +108,7 @@ verifyModule valueAnalysis astore opts mname = do
     inferCallTypes opts allcons isVisible mname flatprog
   -- infer in/out types:
   (iotypes, numntiotypes, numpubntiotypes) <- id $!!
-    inferIOTypes opts valueAnalysis astore isVisible flatprog
+    inferIOTypes opts valueanalysis astore isVisible flatprog
 
   let vstate = initVerifyState fdecls allcons (Map.fromList impacalltypes)
                                (Map.fromList acalltypes)
@@ -196,8 +196,8 @@ inferCallTypes opts allcons isVisible mname flatprog = do
 inferIOTypes :: TermDomain a => Options -> Analysis a -> IORef (AnalysisStore a)
              -> (QName -> Bool) -> Prog
              -> IO ([(QName, InOutType a)], Int, Int)
-inferIOTypes opts valueAnalysis astore isVisible flatprog = do
-  rvmap <- loadAnalysisWithImports astore valueAnalysis opts flatprog
+inferIOTypes opts valueanalysis astore isVisible flatprog = do
+  rvmap <- loadAnalysisWithImports astore valueanalysis opts flatprog
   let iotypes      = map (inOutATypeFunc rvmap) (progFuncs flatprog)
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
       pubntiotypes = filter (isVisible . fst) ntiotypes

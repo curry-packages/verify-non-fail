@@ -66,7 +66,7 @@ main = do
   case progs of
     [] -> unless (optDeleteCache opts) $ error "Module name missing"
     ms -> do astore <- newIORef (AnaStore [])
-             mapM_ (runModuleAction (verifyModule astore opts)) ms
+             mapM_ (runModuleAction (verifyModule valueAnalysis astore opts)) ms
 
 -- compatibility definitions for the moment:
 type VarType = Verify.IOTypes.VarType AType
@@ -75,8 +75,8 @@ type ACallType = Verify.CallTypes.ACallType AType
 
 
 --- Verify a single module.
-verifyModule :: IORef (AnalysisStore AType) -> Options -> String -> IO ()
-verifyModule astore opts mname = do
+verifyModule :: Analysis AType -> IORef (AnalysisStore AType) -> Options -> String -> IO ()
+verifyModule valueanalysis astore opts mname = do
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- readFlatCurry mname >>= return . transformChoiceInProg
   let fdecls       = progFuncs flatprog
@@ -90,7 +90,8 @@ verifyModule astore opts mname = do
       then do
         whenStatus opts $ putStr $
           "Reading abstract types of imports: " ++ unwords (progImports flatprog)
-        readTypesOfModules opts (verifyModule astore) (progImports flatprog)
+        readTypesOfModules opts (verifyModule valueanalysis astore)
+                           (progImports flatprog)
       else return ([],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
@@ -102,7 +103,7 @@ verifyModule astore opts mname = do
     inferCallTypes opts allcons isVisible mname flatprog
   -- infer in/out types:
   (iotypes, numntiotypes, numpubntiotypes) <- id $!!
-    inferIOTypes opts astore isVisible flatprog
+    inferIOTypes opts valueanalysis astore isVisible flatprog
 
   let vstate = initVerifyState fdecls allcons (Map.fromList impacalltypes)
                                (Map.fromList acalltypes)
@@ -144,10 +145,8 @@ verifyModule astore opts mname = do
 
 --- Infer the initial (abstract) call types of all functions in a program and
 --- return them together with the number of all/public non-trivial call types.
-inferCallTypes :: Options
-               -> [[(QName,Int)]]
-               -> (QName -> Bool) -> String -> Prog
-               -> IO ([(QName, ACallType)], Int, Int)
+inferCallTypes :: Options -> [[(QName,Int)]] -> (QName -> Bool)
+               -> String -> Prog -> IO ([(QName, ACallType)], Int, Int)
 inferCallTypes opts allcons isVisible mname flatprog = do
   mtime           <- getModuleModTime mname
   oldpubcalltypes <- readPublicCallTypeModule opts allcons mtime mname
@@ -188,12 +187,11 @@ inferCallTypes opts allcons isVisible mname flatprog = do
 
 --- Infer the in/out types of all functions in a program and return them
 --- together with the number of all and public non-trivial in/out types.
-inferIOTypes :: Options
-             -> IORef (AnalysisStore AType)
+inferIOTypes :: Options -> Analysis AType -> IORef (AnalysisStore AType)
              -> (QName -> Bool) -> Prog
              -> IO ([(QName, InOutType)], Int, Int)
-inferIOTypes opts astore isVisible flatprog = do
-  rvmap <- loadAnalysisWithImports astore valueAnalysis opts flatprog
+inferIOTypes opts valueanalysis astore isVisible flatprog = do
+  rvmap <- loadAnalysisWithImports astore valueanalysis opts flatprog
   let iotypes      = map (inOutATypeFunc rvmap) (progFuncs flatprog)
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
       pubntiotypes = filter (isVisible . fst) ntiotypes
