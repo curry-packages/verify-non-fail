@@ -77,8 +77,8 @@ storeStatistics opts mname stattxt statcsv = when (optStats opts) $ do
   reportWriting writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
  where
   reportWriting wf f s = do
-    when (optVerb opts > 2) $ putStr $ "Storing statistics in '" ++ f ++ "'..."
+    when (optVerb opts > 1) $ putStr $ "Storing statistics in '" ++ f ++ "'..."
     wf f s
-    printWhenAll opts "done"
+    printWhenIntermediate opts "done"
 
 ------------------------------------------------------------------------------

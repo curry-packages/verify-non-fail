@@ -232,7 +232,8 @@ simplifyVarTypes :: TermDomain a => [VarType a] -> [VarType a]
 simplifyVarTypes = simpDefVarTypes []
  where
   simpDefVarTypes defts vartypes =
-    let defvartypes = (concatMap definitiveVarTypesFrom vartypes) \\ defts
+    let defvartypes = (concatMap definitiveVarTypesFrom
+                        (filterUniqueVarTypes vartypes)) \\ defts
     in if null defvartypes -- no more definitive types available?
          then simpEmptyVarTypes [] vartypes
          else simpDefVarTypes (defts ++ defvartypes)
@@ -253,9 +254,22 @@ simplifyVarTypes = simpDefVarTypes []
       if any (`elem` emptyvars) vs then (v, IOT [], vs)
                                    else (v, IOT iots, vs)
 
+  -- Filter the var types of those variables which occur only once,
+  -- i.e., have only one var type binding.
+  filterUniqueVarTypes []                      = []
+  filterUniqueVarTypes (vt@(v,_,_) : vartypes) =
+    let (vtypes, othertypes) = partition (\ (v',_,_) -> v' == v) vartypes
+    in if null vtypes then vt : filterUniqueVarTypes othertypes
+                      else filterUniqueVarTypes othertypes
+
   -- Extracts the definitive types (arguments/results) from a given var type.
+  -- A var type is definitive if the in/out type has exactly one disjunct.
+  -- In this case, the result and argument variables have a definitive type
+  -- if it is different from `anyType`.
+  definitiveVarTypesFrom :: TermDomain a => VarType a -> [(Int,a)]
   definitiveVarTypesFrom iot = case iot of
-    (v, IOT [(ats,rt)], vs) -> filter ((/= anyType) . snd) ((v,rt) : zip vs ats)
+    (v, IOT [(ats,rt)], vs) -> filter (not . isAnyType . snd)
+                                      ((v,rt) : zip vs ats)
     _                       -> []
 
   -- Propagate definite variable types into a set of in/out variable types:
@@ -274,7 +288,7 @@ simplifyVarTypes = simpDefVarTypes []
     | v `elem` vs1 -- propagate a definitive argument into the in/out type:
     = ( v1         -- delete incompatible argument types:
       , maybe (IOT iots) -- should not occur
-              (\i -> IOT (filter (all (/= emptyType) . fst)
+              (\i -> IOT (filter (all (not . isEmptyType) . fst)
                             (map (\ (at,rt) ->
                                    (replace (joinType (at!!i) vt) i at, rt))
                                  iots)))

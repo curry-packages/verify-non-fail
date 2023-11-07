@@ -3,12 +3,13 @@
 --- related operations.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version November 2023
 -------------------------------------------------------------------------
 
 module Verify.Options
   ( Options(..), defaultOptions, processOptions
-  , whenStatus, printWhenStatus, printWhenIntermediate, printWhenAll
+  , whenStatus, printWhenStatus, printWhenIntermediate, printWhenDetails
+  , printWhenAll
   )
  where
 
@@ -79,7 +80,7 @@ options =
            "run quietly (no output, only exit code)"
   , Option "v" ["verbosity"]
             (OptArg (maybe (checkVerb 2) (safeReadNat checkVerb)) "<n>")
-            "verbosity level:\n0: quiet (same as `-q')\n1: show status messages (default)\n2: show intermediate results (same as `-v')\n3: show all details"
+            "verbosity level:\n0: quiet (same as `-q')\n1: show status messages (default)\n2: show intermediate results (same as `-v')\n3: show also verification details\n4: show all details"
   , Option "a" ["all"]
             (NoArg (\opts -> opts { optPublic = False }))
            "show types for all (also private) operations"
@@ -127,7 +128,7 @@ options =
     [(n,"")] -> opttrans n opts
     _        -> error "Illegal number argument (try `-h' for help)"
 
-  checkVerb n opts = if n>=0 && n<4
+  checkVerb n opts = if n >= 0 && n <= 4
                        then opts { optVerb = n }
                        else error "Illegal verbosity level (try `-h' for help)"
 
@@ -153,9 +154,13 @@ printWhenIntermediate :: Options -> String -> IO ()
 printWhenIntermediate opts s =
   when (optVerb opts > 1) (printWT s)
 
+printWhenDetails :: Options -> String -> IO ()
+printWhenDetails opts s =
+ when (optVerb opts > 2) (printWT s)
+
 printWhenAll :: Options -> String -> IO ()
 printWhenAll opts s =
- when (optVerb opts > 2) (printWT s)
+ when (optVerb opts > 3) (printWT s)
 
 printWT :: String -> IO ()
 printWT s = do putStrLn $ s --"NON-FAIL INFERENCE: " ++ s

@@ -136,7 +136,7 @@ storeTypes opts mname allcons acalltypes iotypes = do
   --  writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
  where
   writeFileAndReport f s = do
-    when (optVerb opts > 2) $ putStr $ "Writing cache file '" ++ f ++ "'..."
+    when (optVerb opts > 3) $ putStr $ "Writing cache file '" ++ f ++ "'..."
     writeFile f s
     printWhenAll opts "done"
   

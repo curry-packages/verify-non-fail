@@ -253,7 +253,7 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
   failLine = take 78 (repeat '!')
   failComment = failLine ++ "\nPROGRAM CONTAINS POSSIBLY FAILING "
 
-  printFailures st = do
+  printFailures st = whenStatus opts $ do
     unless (null (vstFailedFuncs st)) $
       putStrLn $ failComment ++ "FUNCTION CALLS:\n" ++
          unlines (map (\ (qf,_,e) -> "Function '" ++ snd qf ++
@@ -270,7 +270,7 @@ showVerifyResult opts vst mname isvisible = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
                             (Map.toList (vstCallTypes vst))
-  if null calltypes || optVerb opts == 0
+  if null calltypes
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
            : showFunResults prettyFunCallAType (sortFunResults calltypes)
@@ -793,7 +793,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
     showVarExpTypes
     addMissingCase exp []
 
-  
+
 -- Verify a branch where the first argument is the case argument variable
 -- and the second argument is the variable identifying the case expression.
 verifyBranch :: Int -> Int -> BranchExpr

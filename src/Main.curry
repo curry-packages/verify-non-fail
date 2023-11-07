@@ -212,6 +212,7 @@ inferIOTypes opts valueanalysis astore isVisible flatprog = do
           (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
   return (iotypes, length ntiotypes, length pubntiotypes)
 
+-- Shows the call and in/out type of a given function defined in the module.
 showFunctionInfo :: TermDomain a => Options -> String -> VerifyState a -> IO ()
 showFunctionInfo opts mname vst = do
   let f = optFunction opts
@@ -261,7 +262,7 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
   failLine = take 78 (repeat '!')
   failComment = failLine ++ "\nPROGRAM CONTAINS POSSIBLY FAILING "
 
-  printFailures st = do
+  printFailures st = whenStatus opts $ do
     unless (null (vstFailedFuncs st)) $
       putStrLn $ failComment ++ "FUNCTION CALLS:\n" ++
          unlines (map (\ (qf,_,e) -> "Function '" ++ snd qf ++
@@ -279,7 +280,7 @@ showVerifyResult opts vst mname isvisible = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
                             (Map.toList (vstCallTypes vst))
-  if null calltypes || optVerb opts == 0
+  if null calltypes
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
            : showFunResults prettyFunCallAType (sortFunResults calltypes)
