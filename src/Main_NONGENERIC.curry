@@ -26,6 +26,7 @@ import Analysis.Types             ( Analysis, analysisName )
 --import Analysis.TermDomain
 import Control.Monad.Trans.Class  ( lift )
 import Control.Monad.Trans.State  ( StateT, get, put, execStateT )
+import Data.Char                  ( toLower )
 import Data.IORef
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -39,6 +40,7 @@ import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist
                                   , removeDirectory )
 import System.FilePath            ( (</>) )
+import System.Process             ( exitWith, system )
 import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
 
 -- Imports from package modules:
@@ -54,19 +56,31 @@ import Verify.Statistics
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 05/11/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 13/11/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
 main = do
   args <- getArgs
-  (opts',progs) <- processOptions banner args
-  let opts = opts' { optDomainID = analysisName valueAnalysis }
-  when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts
-  case progs of
-    [] -> unless (optDeleteCache opts) $ error "Module name missing"
-    ms -> do astore <- newIORef (AnaStore [])
-             mapM_ (runModuleAction (verifyModule valueAnalysis astore opts)) ms
+  (opts0,progs) <- processOptions banner args
+  -- set analysis to standard analysis if unspecified
+  let opts = if null (optDomainID opts0)
+               then opts0 { optDomainID = analysisName valueAnalysis }
+               else opts0
+  if optDomainID opts /= analysisName valueAnalysis
+    then do
+      let cmd = "curry-calltypes-" ++ map toLower (optDomainID opts)
+      putStrLn $ "Different domain, trying executable '" ++ cmd ++ "'..."
+      system (cmd ++ concatMap (\a -> " '" ++ a ++ "'") args) >>= exitWith
+    else do
+      when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts
+      case progs of
+        [] -> unless (optDeleteCache opts) $ error "Module name missing"
+        ms -> runWith valueAnalysis opts ms
+ where
+  runWith analysis opts ms = do
+    astore <- newIORef (AnaStore [])
+    mapM_ (runModuleAction (verifyModule analysis astore opts)) ms
 
 -- compatibility definitions for the moment:
 type VarType = Verify.IOTypes.VarType AType

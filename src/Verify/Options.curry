@@ -49,7 +49,7 @@ data Options = Options
 defaultOptions :: Options
 defaultOptions =
   Options 1 False "" True False False True False False True False
-          False False False "Values"
+          False False False ""
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -86,13 +86,11 @@ options =
            "show types for all (also private) operations"
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
-           "show call types" ] ++
-  (if curryCompiler == "kics2"
-     then [] -- no option `--domain` for KiCS2
-     else [ Option "d" ["domain"]
-                   (ReqArg checkDomain "<d>")
-                   "the analysis domain (Values|Values2|Values5)" ]) ++
-  [ Option "" ["delete"]
+           "show call types"
+  , Option "d" ["domain"]
+           (ReqArg checkDomain "<d>")
+           "the analysis domain (Values|Values2|Values5)"
+  , Option "" ["delete"]
            (NoArg (\opts -> opts { optDeleteCache = True }))
            ("delete all cache files (for " ++ sysname ++ ")")
   , Option "e" ["error"]
@@ -132,9 +130,10 @@ options =
                        then opts { optVerb = n }
                        else error "Illegal verbosity level (try `-h' for help)"
 
-  checkDomain s opts = if s `elem` ["Values", "Values2", "Values5"]
-                         then opts { optDomainID = s }
-                         else error "Illegal domain ID, allowed values: Value|Values2|Values5"
+  checkDomain s opts =
+    if s `elem` ["Values", "Values2", "Values5"]
+      then opts { optDomainID = s }
+      else error "Illegal domain ID, allowed values: Value|Values2|Values5"
 
   sysname = curryCompiler ++ "-" ++
             intercalate "."

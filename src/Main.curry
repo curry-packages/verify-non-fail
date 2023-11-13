@@ -52,17 +52,21 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 05/11/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 13/11/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
 main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
      | otherwise = do
   args <- getArgs
-  (opts,progs) <- processOptions banner args
-  when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts
+  (opts0,progs) <- processOptions banner args
+  -- set analysis to top values if unspecified
+  let opts = if null (optDomainID opts0)
+               then opts0 { optDomainID = analysisName resultValueAnalysisTop }
+               else opts0
+  when (optDeleteCache opts0) $ deleteVerifyCacheDirectory opts0
   case progs of
-    [] -> unless (optDeleteCache opts) $ error "Module name missing"
+    [] -> unless (optDeleteCache opts0) $ error "Module name missing"
     ms -> do
       if optDomainID opts == analysisName resultValueAnalysisTop
         then runWith resultValueAnalysisTop opts ms
