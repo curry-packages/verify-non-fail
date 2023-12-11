@@ -70,7 +70,7 @@ normalizeIOT (IOT iotypes) =
 
 ------------------------------------------------------------------------------
 --- The state passed to compute call types contains a mapping from
---- variables (indices) to their positions and the current call type
+--- variables (indices) to their positions and the current call pattern
 --- for the operation to be analyzed.
 data InOutTypeState a = InOutTypeState
   { currentOp :: QName                  -- the name of the current function
