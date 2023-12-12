@@ -8,8 +8,8 @@
 
 module Verify.IOTypes
   ( InOutType(..), trivialInOutType, isAnyIOType, showIOT, inOutATypeFunc
-  , VarType, ioVarType, showVarTypes, showArgumentVars
-  , VarTypes, VarTypesMap, addVarType2Map, setVarTypeInMap
+  , VarTypes, VarTypesMap, ioVarType, showVarTypes, showArgumentVars
+  , addVarType2Map, concVarTypesMap, setVarTypeInMap
   , bindVarInIOTypes, simplifyVarTypes
   )
  where
@@ -210,13 +210,14 @@ inOutATypeExpr tst exp = case exp of
 ---   simply `{() |-> any}` if the variable is unbound
 --- * the list `vs` of arguments of the function to which `v` is bound
 ---   (which could be empty).
-type VarType a = (Int, InOutType a, [Int])
-
---- The variable types approximate for a variable a disjunction,
---- represented as a list, of in/out types and their argument variables.
+---
+--- In order to combine all in/out variables types for a variable,
+--- we represent it by the variable and a disjunction of in/out types and
+--- their argument variables, represented as a list. This disjunction
+--- is defined by the following type:
 type VarTypes a = [(InOutType a, [Int])]
 
---- The `VarTypesMap` is a mapping frim variables to their variable types.
+--- The `VarTypesMap` is a mapping from variables to their variable types.
 type VarTypesMap a = [(Int, VarTypes a)]
 
 
@@ -247,6 +248,11 @@ addVarType2Map v vts = insert
   insert ((v1,vts1) : vmap) | v == v1   = (v, vts1 ++ vts) : vmap
                             | v1 < v    = (v1,vts1) : insert vmap
                             | otherwise = (v,vts) : (v1,vts1) : vmap
+
+--- Concatenates two `VarTypesMap`s.
+concVarTypesMap :: TermDomain a
+                => VarTypesMap a -> VarTypesMap a -> VarTypesMap a
+concVarTypesMap vm1 vm2 = foldr (uncurry addVarType2Map) vm2 vm1
 
 --- Replaces the variable types of a variable in a `VarTypesMap`.
 setVarTypeInMap :: TermDomain a

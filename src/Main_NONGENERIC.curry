@@ -83,7 +83,6 @@ main = do
     mapM_ (runModuleAction (verifyModule analysis astore opts)) ms
 
 -- compatibility definitions for the moment:
-type VarType = Verify.IOTypes.VarType AType
 type VarTypes = Verify.IOTypes.VarTypes AType
 type VarTypesMap = Verify.IOTypes.VarTypesMap AType
 type InOutType = Verify.IOTypes.InOutType AType
@@ -460,8 +459,8 @@ getVarTypes = do
   return $ vstVarTypes st
 
 -- Gets the currently stored types for a given variable.
-getVarTypesOf :: Int -> VerifyStateM VarTypes
-getVarTypesOf v = do
+getVarTypeOf :: Int -> VerifyStateM VarTypes
+getVarTypeOf v = do
   st <- get
   return $ maybe [] id (lookup v (vstVarTypes st))
 
@@ -480,8 +479,10 @@ addVarType v vts = do
   put $ st { vstVarTypes = addVarType2Map v vts (vstVarTypes st) }
 
 -- Adding multiple variable types:
-addVarTypes :: [VarType] -> VerifyStateM ()
-addVarTypes = mapM_ (\(v,io,vs) -> addVarType v [(io,vs)])
+addVarTypes :: VarTypesMap -> VerifyStateM ()
+addVarTypes vtsmap = do
+  st <- get
+  put $ st { vstVarTypes = concVarTypesMap (vstVarTypes st) vtsmap }
 
 -- Adds a new variable `Any` type to the current set of variable types.
 addVarAnyType :: Int -> VerifyStateM ()
@@ -634,19 +635,19 @@ ppExp e = FCP.ppExp FCP.defaultOptions { FCP.qualMode = FCP.QualNone} e
 verifyExpr :: Bool -> Expr -> VerifyStateM Int
 verifyExpr verifyexp exp = case exp of
   Var v -> do iots <- if verifyexp then verifyVarExpr v exp
-                                   else return [(v, IOT [([], anyType)], [])]
+                                   else return [(v, ioVarType anyType)]
               addVarTypes iots
               return v
   _     -> do v <- newFreshVarIndex
               addVarExps [(v,exp)]
               iots <- if verifyexp then verifyVarExpr v exp
-                                   else return [(v, IOT [([], anyType)], [])]
+                                   else return [(v, ioVarType anyType)]
               addVarTypes iots
               return v
 
 -- Verify an expression identified by variable (first argument).
 -- The in/out variable types collected for the variable are returned.
-verifyVarExpr :: Int -> Expr -> VerifyStateM [VarType]
+verifyVarExpr :: Int -> Expr -> VerifyStateM VarTypesMap
 verifyVarExpr ve exp = case exp of
   Var v         -> if v == ve
                      then return []
@@ -654,11 +655,11 @@ verifyVarExpr ve exp = case exp of
                        --lift $ putStrLn $ "Expression with different vars: " ++
                        --                  show (v,ve)
                        --showVarExpTypes
-                       vtypes <- getVarTypesOf v
+                       vtypes <- getVarTypeOf v
                        -- TODO: improve by handling equality constraint v==ve
                        -- instead of copying the current types for v to ve:
-                       return $ map (\ (iots,vs) -> (ve,iots,vs)) vtypes
-  Lit l         -> return [(ve, IOT [([], aLit l)], [])]
+                       return $ [(ve, vtypes)]
+  Lit l         -> return [(ve, [(IOT [([], aLit l)], [])])]
   Comb ct qf es -> checkDivOpNonZero exp $ do
     vs <- if isEncSearchOp qf
             then -- for encapsulated search, failures in arguments are hidden
@@ -672,7 +673,7 @@ verifyVarExpr ve exp = case exp of
       FuncCall -> do opts <- getToolOptions
                      verifyFuncCall (optError opts) exp qf vs
                      ftype <- getFuncType qf (length vs)
-                     return [(ve, ftype, vs)]
+                     return [(ve, [(ftype, vs)])]
       FuncPartCall n -> -- note: also partial calls are considered as constr.
                   do ctype <- getCallType qf (n + length es)
                      unless (isTotalACallType ctype) $ do
@@ -695,16 +696,16 @@ verifyVarExpr ve exp = case exp of
                       verifyVarExpr ve e
   Or e1 e2      -> do iots1 <- verifyVarExpr ve e1 -- 
                       iots2 <- verifyVarExpr ve e2
-                      return (iots1 ++ iots2)
+                      return (concVarTypesMap iots1 iots2)
   Case _ ce bs  -> do cv <- verifyExpr True ce
                       verifyMissingBranches exp cv bs
                       iotss <- mapM (verifyBranch cv ve) bs
-                      return (concat iotss)
+                      return (foldr concVarTypesMap [] iotss)
   Typed e _     -> verifyVarExpr ve e -- TODO: use type info
  where
   -- adds Any type for a variable if it is unknown
   addAnyTypeIfUnknown v = do
-    vts <- getVarTypesOf v
+    vts <- getVarTypeOf v
     when (null vts) (addVarAnyType v)
 
   -- Return an input/output type for a constructor and its arguments
@@ -713,7 +714,7 @@ verifyVarExpr ve exp = case exp of
     let vstypes = map (flip getVarType vts) vs
     --let anys = anyTypes (length vs)  -- TODO: use vs types from VarTypes!!!!
     --return [(rv, IOT [(anys, aCons qc anys)], vs)]
-    return [(rv, IOT [(vstypes, aCons qc vstypes)], vs)]
+    return [(rv, [(IOT [(vstypes, aCons qc vstypes)], vs)])]
 
 -- Verify the nonfailing type of a function
 verifyFuncCall :: Bool -> Expr -> QName -> [Int] -> VerifyStateM ()
@@ -762,7 +763,7 @@ verifyFuncCall errorfail exp qf vs
 -- This is specific to the current implementation of div/mod where a call
 -- like `div e n` is translated into the FlatCurry expression
 -- `apply (apply Prelude._impl#div#Prelude.Integral#Prelude.Int e) n`
-checkDivOpNonZero :: Expr -> VerifyStateM [VarType] -> VerifyStateM [VarType]
+checkDivOpNonZero :: Expr -> VerifyStateM VarTypesMap -> VerifyStateM VarTypesMap
 checkDivOpNonZero exp cont = case exp of
   Comb FuncCall ap1 [ Comb FuncCall ap2 [Comb FuncCall dm _, arg1], nexp]
       | ap1 == apply && ap2 == apply && dm `elem` divops && isNonZero nexp
@@ -823,7 +824,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
 
 -- Verify a branch where the first argument is the case argument variable
 -- and the second argument is the variable identifying the case expression.
-verifyBranch :: Int -> Int -> BranchExpr -> VerifyStateM  [VarType]
+verifyBranch :: Int -> Int -> BranchExpr -> VerifyStateM  VarTypesMap
 verifyBranch casevar ve (Branch (LPattern l)    e) = do
   vts <- getVarTypes
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
