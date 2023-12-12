@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version December 2023
 -------------------------------------------------------------------------
 
 module Main where
@@ -18,7 +18,7 @@ import System.Environment          ( getArgs )
 import Debug.Trace ( trace )
 
 -- Imports from dependencies:
-import Analysis.Types             ( Analysis, analysisName )
+import Analysis.Types             ( Analysis, analysisName, startValue )
 import Analysis.TermDomain
 import Analysis.Values
 import Control.Monad.Trans.Class  ( lift )
@@ -52,7 +52,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 13/11/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 12/12/23)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -233,8 +233,8 @@ showFunctionInfo opts mname vst = do
 -- Try to verify a module, possibly in several iterations.
 -- The second argument is the number of already performed iterations,
 -- the first component of the result is the total number of iterations.
-tryVerifyProg :: TermDomain a => Options -> Int -> VerifyState a
-              -> String -> Map.Map QName [FuncDecl] -> [FuncDecl]
+tryVerifyProg :: TermDomain a => Options -> Int -> VerifyState a -> String
+              -> Map.Map QName [FuncDecl] -> [FuncDecl]
               -> IO (Int,VerifyState a)
 tryVerifyProg opts numits vstate mname funusage fdecls = do
   st <- execStateT (mapM_ verifyFunc fdecls) vstate
@@ -326,7 +326,7 @@ data VerifyState a = VerifyState
   , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
-  , vstVarTypes    :: [VarType a]       -- map variable to its abstract types
+  , vstVarTypes    :: VarTypesMap a     -- map variable to its abstract types
   , vstImpCallTypes:: Map.Map QName (ACallType a) -- call types of imports
   , vstCallTypes   :: Map.Map QName (ACallType a) -- call types of module
   , vstIOTypes     :: Map.Map QName (InOutType a) -- in/out type for all funcs
@@ -452,19 +452,19 @@ addVarExps varexps = do
   put $ st { vstVarExp = vstVarExp st ++ varexps }
 
 -- Get all currently stored variable types.
-getVarTypes :: TermDomain a => VerifyStateM a [VarType a]
+getVarTypes :: TermDomain a => VerifyStateM a (VarTypesMap a)
 getVarTypes = do
   st <- get
   return $ vstVarTypes st
 
 -- Gets the currently stored types for a given variable.
-getVarTypesOf :: TermDomain a => Int -> VerifyStateM a [VarType a]
+getVarTypesOf :: TermDomain a => Int -> VerifyStateM a (VarTypes a)
 getVarTypesOf v = do
   st <- get
-  return $ filter ((==v) . fst3) (vstVarTypes st)
+  return $ maybe [] id (lookup v (vstVarTypes st))
 
 -- Sets all variable types.
-setVarTypes :: TermDomain a => [VarType a] -> VerifyStateM a ()
+setVarTypes :: TermDomain a => VarTypesMap a -> VerifyStateM a ()
 setVarTypes vartypes = do
   st <- get
   put $ st { vstVarTypes = vartypes }
@@ -472,14 +472,18 @@ setVarTypes vartypes = do
 -- Adds a new variable type to the current set of variable types.
 -- It could be an alternative type for an already existent variable or
 -- a type for a new variable.
-addVarType :: TermDomain a => VarType a -> VerifyStateM a ()
-addVarType vartype = do
+addVarType :: TermDomain a => Int -> VarTypes a -> VerifyStateM a ()
+addVarType v vts = do
   st <- get
-  put $ st { vstVarTypes = vstVarTypes st ++ [vartype] }
+  put $ st { vstVarTypes = addVarType2Map v vts (vstVarTypes st) }
+
+-- Adding multiple variable types:
+addVarTypes :: TermDomain a => [VarType a] -> VerifyStateM a ()
+addVarTypes = mapM_ (\(v,io,vs) -> addVarType v [(io,vs)])
 
 -- Adds a new variable `Any` type to the current set of variable types.
 addVarAnyType :: TermDomain a => Int -> VerifyStateM a ()
-addVarAnyType v = addVarType (ioVarType v anyType)
+addVarAnyType v = addVarType v (ioVarType anyType)
 
 -- Removes an `Any` type for a given variable from the current
 -- set of variable types.
@@ -487,9 +491,15 @@ addVarAnyType v = addVarType (ioVarType v anyType)
 removeVarAnyType :: TermDomain a => Int -> VerifyStateM a ()
 removeVarAnyType v = do
   st <- get
-  put $ st { vstVarTypes = filter (not . isAnyTypeForV) (vstVarTypes st) }
+  let vtsmap = vstVarTypes st
+      vtsmap' = maybe vtsmap
+                      (\vts -> setVarTypeInMap v
+                                               (filter (not . isAnyIOType) vts)
+                                               vtsmap)
+                      (lookup v vtsmap)
+  put $ st { vstVarTypes = vtsmap' }
  where
-  isAnyTypeForV (var,vt,vs) = var == v &&
+  isAnyIOType (vt,vs) =
     case (vt,vs) of (IOT [([], at)], []) -> isAnyType at
                     _                    -> False
 
@@ -582,8 +592,8 @@ verifyFuncRule vs exp = do
    then printIfVerb 2 $ "not checked since trivial"
    else maybe (printIfVerb 2 $ "not checked since marked as always failing")
              (\atargs -> do
-                setVarTypes (map (\(v,at) -> (v, IOT [([],at)], []))
-                            (zip vs atargs))
+                setVarTypes (map (\(v,at) -> (v, [(IOT [([], at)], [])]))
+                                 (zip vs atargs))
                 showVarExpTypes
                 verifyExpr True exp
                 return ())
@@ -623,13 +633,13 @@ verifyExpr :: TermDomain a => Bool -> Expr -> VerifyStateM a Int
 verifyExpr verifyexp exp = case exp of
   Var v -> do iots <- if verifyexp then verifyVarExpr v exp
                                    else return [(v, IOT [([], anyType)], [])]
-              mapM addVarType iots
+              addVarTypes iots
               return v
   _     -> do v <- newFreshVarIndex
               addVarExps [(v,exp)]
               iots <- if verifyexp then verifyVarExpr v exp
                                    else return [(v, IOT [([], anyType)], [])]
-              mapM addVarType iots
+              addVarTypes iots
               return v
 
 -- Verify an expression identified by variable (first argument).
@@ -645,7 +655,7 @@ verifyVarExpr ve exp = case exp of
                        vtypes <- getVarTypesOf v
                        -- TODO: improve by handling equality constraint v==ve
                        -- instead of copying the current types for v to ve:
-                       return $ map (\ (_,iots,vs) -> (ve,iots,vs)) vtypes
+                       return $ map (\ (iots,vs) -> (ve,iots,vs)) vtypes
   Lit l         -> return [(ve, IOT [([], aLit l)], [])]
   Comb ct qf es -> checkDivOpNonZero exp $ do
     vs <- if isEncSearchOp qf
@@ -675,7 +685,7 @@ verifyVarExpr ve exp = case exp of
                       iotss <- mapM (\ (v,be) -> verifyVarExpr v be) bs
                       -- remove initially set anyType's for the bound vars:
                       mapM_ (removeVarAnyType . fst) bs
-                      mapM_ addVarType (concat iotss)
+                      addVarTypes (concat iotss)
                       mapM_ (addAnyTypeIfUnknown . fst) bs
                       verifyVarExpr ve e
   Free vs e     -> do addVarExps (map (\v -> (v, Var v)) vs)
@@ -812,8 +822,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
 
 -- Verify a branch where the first argument is the case argument variable
 -- and the second argument is the variable identifying the case expression.
-verifyBranch :: TermDomain a => Int -> Int -> BranchExpr
-             -> VerifyStateM a [(Int, InOutType a, [Int])]
+verifyBranch :: TermDomain a => Int -> Int -> BranchExpr -> VerifyStateM a [VarType a]
 verifyBranch casevar ve (Branch (LPattern l)    e) = do
   vts <- getVarTypes
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
@@ -832,7 +841,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   if isEmptyType casevartype
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
-            mapM_ (\(v,t) -> addVarType (ioVarType v t))
+            mapM_ (\(v,t) -> addVarType v (ioVarType t))
                   (zip vs (argTypesOfCons qc (length vs) casevartype))
             --mapM_ addVarAnyType vs
             iots <- verifyVarExpr ve e
@@ -840,14 +849,13 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
             return iots
 
 -- Gets the abstract type of a variable w.r.t. a set of variable types.
-getVarType :: TermDomain a => Int -> [VarType a] -> a
-getVarType v viots =
-  let vts = filter (\ (rv, _, _) -> rv == v) viots
-  in if null vts
-       then error $ "Type of variable " ++ show v ++ " not found!"
-       else let rts = concatMap (\ (_, IOT iots, _) -> map snd iots) vts 
-            in if null rts then emptyType
-                           else foldr1 lubType rts
+getVarType :: TermDomain a => Int -> VarTypesMap a -> a
+getVarType v vtsmap =
+  maybe (error $ "Type of variable " ++ show v ++ " not found!")
+        (\vts -> let rts = concatMap (\ (IOT iots, _) -> map snd iots) vts 
+                 in if null rts then emptyType
+                                else foldr1 lubType rts)
+        (lookup v vtsmap)
 
 ------------------------------------------------------------------------------
 --- Computes for a given set of function declarations in a module
@@ -880,9 +888,6 @@ anyTypes n = take n (repeat anyType)
 
 ------------------------------------------------------------------------------
 -- Utilities
-
-fst3 :: (a,b,c) -> a
-fst3 (x,_,_) = x
 
 -- I/O action to force evaluation of the argument to normal form.
 enforceNormalForm :: a -> IO ()

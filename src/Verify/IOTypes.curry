@@ -3,13 +3,14 @@
 --- and manipulate such types.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version December 2023
 ------------------------------------------------------------------------------
 
 module Verify.IOTypes
   ( InOutType(..), trivialInOutType, isAnyIOType, showIOT, inOutATypeFunc
-  , VarType, ioVarType, showVarTypes, showArgumentVars, simplifyVarTypes
-  , bindVarInIOTypes
+  , VarType, ioVarType, showVarTypes, showArgumentVars
+  , VarTypes, VarTypesMap, addVarType2Map, setVarTypeInMap
+  , bindVarInIOTypes, simplifyVarTypes
   )
  where
 
@@ -211,103 +212,130 @@ inOutATypeExpr tst exp = case exp of
 ---   (which could be empty).
 type VarType a = (Int, InOutType a, [Int])
 
---- A variable with a type represented as an input/output variable type.
-ioVarType :: TermDomain a => Int -> a -> VarType a
-ioVarType v atype = (v, IOT [([], atype)], [])
+--- The variable types approximate for a variable a disjunction,
+--- represented as a list, of in/out types and their argument variables.
+type VarTypes a = [(InOutType a, [Int])]
+
+--- The `VarTypesMap` is a mapping frim variables to their variable types.
+type VarTypesMap a = [(Int, VarTypes a)]
+
+
+--- An abstract type represented as an input/output type for a variable.
+ioVarType :: TermDomain a => a -> VarTypes a
+ioVarType atype = [(IOT [([], atype)], [])]
 
 --- Shows a list of input/output variables types.
-showVarTypes :: TermDomain a => [VarType a] -> String
+showVarTypes :: TermDomain a => VarTypesMap a  -> String
 showVarTypes = unlines . map showVarType
  where
-  showVarType (rv, iot, argvs) =
-    'v' : show rv ++ ": " ++ showIOT iot ++ " " ++ showArgumentVars argvs
+  showVarType (rv, vts) =
+    'v' : show rv ++ ": " ++
+    intercalate "  ||  "
+      (map (\(iot,argvs) -> showIOT iot ++ " " ++ showArgumentVars argvs) vts)
 
 --- Shows a list of argument variables in parentheses.
 showArgumentVars :: [Int] -> String
 showArgumentVars argvs =
   "(" ++ intercalate "," (map (\v -> 'v' : show v) argvs) ++ ")"
 
---- Simplify a set of input/output variable types.
-simplifyVarTypes :: TermDomain a => [VarType a] -> [VarType a]
+--- Adds variable types for a given variable to a `VarTypesMap`.
+addVarType2Map :: TermDomain a
+               => Int -> VarTypes a -> VarTypesMap a -> VarTypesMap a
+addVarType2Map v vts = insert
+ where
+  insert []                             = [(v,vts)]
+  insert ((v1,vts1) : vmap) | v == v1   = (v, vts1 ++ vts) : vmap
+                            | v1 < v    = (v1,vts1) : insert vmap
+                            | otherwise = (v,vts) : (v1,vts1) : vmap
+
+--- Replaces the variable types of a variable in a `VarTypesMap`.
+setVarTypeInMap :: TermDomain a
+                => Int -> VarTypes a -> VarTypesMap a -> VarTypesMap a
+setVarTypeInMap v vts = replace
+ where
+  replace []                            = [(v,vts)]
+  replace ((v1,vts1) : vmap) | v == v1   = (v, vts)  : vmap
+                             | v1 < v    = (v1,vts1) : replace vmap
+                             | otherwise = (v,vts)   : (v1,vts1) : vmap
+
+--- Adds the binding of a variable to an abstract type (usually, the
+--- abstract representation of a constructor) to the variable type map.
+bindVarInIOTypes :: TermDomain a => Int -> a -> VarTypesMap a -> VarTypesMap a
+bindVarInIOTypes var vatype vtsmap =
+  setVarTypeInMap var (maybe [] (map bindIOResult) (lookup var vtsmap)) vtsmap
+ where
+  bindIOResult (IOT iots, vs) =
+    ( IOT (filter ((/= emptyType) . snd) -- remove empty alternative types
+                  (map (\ (ats,rt) -> (ats, joinType rt vatype)) iots))
+    , vs)
+
+--- Simplify a set of input/output variable types by exploiting
+--- information about definitive abstract types (i.e., constructors).
+simplifyVarTypes :: TermDomain a => VarTypesMap a -> VarTypesMap a
 simplifyVarTypes = simpDefVarTypes []
  where
   simpDefVarTypes defts vartypes =
-    let defvartypes = (concatMap definitiveVarTypesFrom
-                        (filterUniqueVarTypes vartypes)) \\ defts
+    let defvartypes = concatMap definitiveVarTypesFrom vartypes \\ defts
     in if null defvartypes -- no more definitive types available?
          then simpEmptyVarTypes [] vartypes
          else simpDefVarTypes (defts ++ defvartypes)
                               (propagateDefTypes defvartypes vartypes)
 
-  simpEmptyVarTypes evs vartypes =
-    if null emptyvars
-      then vartypes
-      else simpEmptyVarTypes (emptyvars ++ evs)
-                             (map propagateEmptyVars vartypes)
-   where
-    -- variables with an empty domain:
-    emptyvars = mapMaybe getEmptyVar vartypes \\ evs
-     where getEmptyVar iot = case iot of (v, IOT [], _) -> Just v
-                                         _              -> Nothing
-
-    propagateEmptyVars (v, IOT iots, vs) =
-      if any (`elem` emptyvars) vs then (v, IOT [], vs)
-                                   else (v, IOT iots, vs)
-
-  -- Filter the var types of those variables which occur only once,
-  -- i.e., have only one var type binding.
-  filterUniqueVarTypes []                      = []
-  filterUniqueVarTypes (vt@(v,_,_) : vartypes) =
-    let (vtypes, othertypes) = partition (\ (v',_,_) -> v' == v) vartypes
-    in if null vtypes then vt : filterUniqueVarTypes othertypes
-                      else filterUniqueVarTypes othertypes
-
-  -- Extracts the definitive types (arguments/results) from a given var type.
-  -- A var type is definitive if the in/out type has exactly one disjunct.
+  -- Extracts the definitive type (arguments/results) from a given var type.
+  -- A var type is definitive if it has one disjucnt and the in/out type
+  -- in this disjunct has also exactly one disjunct.
   -- In this case, the result and argument variables have a definitive type
   -- if it is different from `anyType`.
-  definitiveVarTypesFrom :: TermDomain a => VarType a -> [(Int,a)]
+  definitiveVarTypesFrom :: TermDomain a => (Int, VarTypes a) -> [(Int,a)]
   definitiveVarTypesFrom iot = case iot of
-    (v, IOT [(ats,rt)], vs) -> filter (not . isAnyType . snd)
-                                      ((v,rt) : zip vs ats)
-    _                       -> []
+    (v, [(IOT [(ats,rt)], vs)]) -> filter (not . isAnyType . snd)
+                                          ((v,rt) : zip vs ats)
+    _                           -> []
+
+  simpEmptyVarTypes evs vartypes =
+    if null emptyvars then vartypes
+                      else simpEmptyVarTypes (emptyvars ++ evs)
+                                             (map propagateEmptyVars vartypes)
+   where
+    -- variables with an empty domain:
+    emptyvars = concatMap getEmptyVar vartypes \\ evs
+     where
+      getEmptyVar (v, vts) = if IOT [] `elem` map fst vts then [v] else []
+
+    propagateEmptyVars (v, vts) =
+      (v, map (\ (IOT iots, vs) ->
+                  if any (`elem` emptyvars) vs then (IOT []  , vs)
+                                               else (IOT iots, vs)) vts)
 
   -- Propagate definite variable types into a set of in/out variable types:
+  propagateDefTypes :: TermDomain a
+                    => [(Int,a)] -> VarTypesMap a -> VarTypesMap a
   propagateDefTypes []           viots = viots
   propagateDefTypes ((v,vt):vts) viots =
     propagateDefTypes vts (map (propagateDefType (v,vt)) viots)
 
   -- Propagate a definite variable type into an in/out variable type
   -- by either refining the result types or argument types:
-  propagateDefType (v,vt) (v1, IOT iots, vs1)
+  propagateDefType (v,vt) (v1, vts)  -- [(IOT iots, vs1)]
     | v == v1 -- propagate the definite result into the input/output type:
     = ( v1
-      , IOT (filter ((/= emptyType) . snd)
-                    (map (\ (at,rt) -> (at, joinType rt vt)) iots))
-      , vs1)
-    | v `elem` vs1 -- propagate a definitive argument into the in/out type:
-    = ( v1         -- delete incompatible argument types:
-      , maybe (IOT iots) -- should not occur
-              (\i -> IOT (filter (all (not . isEmptyType) . fst)
-                            (map (\ (at,rt) ->
-                                   (replace (joinType (at!!i) vt) i at, rt))
-                                 iots)))
-              (elemIndex v vs1)
-      , vs1)
+      , map (\ (IOT iots, vs1) -> 
+                (IOT (filter ((/= emptyType) . snd)
+                     (map (\ (at,rt) -> (at, joinType rt vt)) iots)), vs1))
+            vts )
     | otherwise
-    = (v1, IOT iots, vs1)
-
---- Adds the binding of a variable to an abstract type (the representation
---- of a constructor) to the set of input/output types for variables.
-bindVarInIOTypes :: TermDomain a => Int -> a -> [VarType a]
-                 -> [VarType a]
-bindVarInIOTypes var vatype = map bindVar
- where
-  bindVar (v, IOT iots, vs)
-    | var /= v  = (v, IOT iots, vs)
-    | otherwise
-    = (v, IOT (filter ((/= emptyType) . snd) -- remove empty alternative types
-                 (map (\ (ats,rt) -> (ats, joinType rt vatype))
-                      iots)), vs)
+    = ( v1
+      , map (\ (IOT iots, vs1) ->
+             if  v `elem` vs1 -- propagate a def. argument into in/out type:
+               then -- delete incompatible argument types:
+                    (maybe (IOT iots) -- should not occur
+                           (\i -> IOT (filter (all (not . isEmptyType) . fst)
+                                        (map (\ (at,rt) ->
+                                                (replace (joinType (at!!i) vt)
+                                                         i at, rt))
+                                             iots)))
+                           (elemIndex v vs1), vs1)
+               else (IOT iots, vs1))
+            vts )
 
 ------------------------------------------------------------------------------

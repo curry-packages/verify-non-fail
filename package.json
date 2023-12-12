@@ -1,5 +1,5 @@
 {
-    "name": "verify-total",
+    "name": "verify-non-failing",
     "version": "0.0.1",
     "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
     "synopsis": "A tool to verify totality of Curry operations",
@@ -12,8 +12,8 @@
         "cass"           : ">= 3.0.0, < 4.0.0",
         "cass-analysis"  : ">= 3.0.0, < 4.0.0",
         "containers"     : ">= 3.0.0, < 4.0.0",
-        "csv"            : ">= 3.0.0, < 4.0.0",
         "contracts"      : ">= 3.0.0, < 4.0.0",
+        "csv"            : ">= 3.0.0, < 4.0.0",
         "currypath"      : ">= 3.0.0, < 4.0.0",
         "directory"      : ">= 3.0.0, < 4.0.0",
         "filepath"       : ">= 3.0.0, < 4.0.0",

@@ -10,7 +10,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version December 2023
 -------------------------------------------------------------------------
 
 module Main_NONGENERIC (main) where
@@ -84,6 +84,8 @@ main = do
 
 -- compatibility definitions for the moment:
 type VarType = Verify.IOTypes.VarType AType
+type VarTypes = Verify.IOTypes.VarTypes AType
+type VarTypesMap = Verify.IOTypes.VarTypesMap AType
 type InOutType = Verify.IOTypes.InOutType AType
 type ACallType = Verify.CallTypes.ACallType AType
 
@@ -220,6 +222,7 @@ inferIOTypes opts valueanalysis astore isVisible flatprog = do
           (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
   return (iotypes, length ntiotypes, length pubntiotypes)
 
+-- Shows the call and in/out type of a given function defined in the module.
 showFunctionInfo :: Options -> String -> VerifyState -> IO ()
 showFunctionInfo opts mname vst = do
   let f = optFunction opts
@@ -325,7 +328,7 @@ data VerifyState = VerifyState
   , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
-  , vstVarTypes    :: [VarType]         -- map variable to its abstract types
+  , vstVarTypes    :: VarTypesMap       -- map variable to its abstract types
   , vstImpCallTypes:: Map.Map QName ACallType -- call types of imports
   , vstCallTypes   :: Map.Map QName ACallType -- call types of module
   , vstIOTypes     :: Map.Map QName InOutType -- in/out type for all funcs
@@ -451,19 +454,19 @@ addVarExps varexps = do
   put $ st { vstVarExp = vstVarExp st ++ varexps }
 
 -- Get all currently stored variable types.
-getVarTypes :: VerifyStateM [VarType]
+getVarTypes :: VerifyStateM VarTypesMap
 getVarTypes = do
   st <- get
   return $ vstVarTypes st
 
 -- Gets the currently stored types for a given variable.
-getVarTypesOf :: Int -> VerifyStateM [VarType]
+getVarTypesOf :: Int -> VerifyStateM VarTypes
 getVarTypesOf v = do
   st <- get
-  return $ filter ((==v) . fst3) (vstVarTypes st)
+  return $ maybe [] id (lookup v (vstVarTypes st))
 
 -- Sets all variable types.
-setVarTypes :: [VarType] -> VerifyStateM ()
+setVarTypes :: VarTypesMap -> VerifyStateM ()
 setVarTypes vartypes = do
   st <- get
   put $ st { vstVarTypes = vartypes }
@@ -471,14 +474,18 @@ setVarTypes vartypes = do
 -- Adds a new variable type to the current set of variable types.
 -- It could be an alternative type for an already existent variable or
 -- a type for a new variable.
-addVarType :: VarType -> VerifyStateM ()
-addVarType vartype = do
+addVarType :: Int -> VarTypes -> VerifyStateM ()
+addVarType v vts = do
   st <- get
-  put $ st { vstVarTypes = vstVarTypes st ++ [vartype] }
+  put $ st { vstVarTypes = addVarType2Map v vts (vstVarTypes st) }
+
+-- Adding multiple variable types:
+addVarTypes :: [VarType] -> VerifyStateM ()
+addVarTypes = mapM_ (\(v,io,vs) -> addVarType v [(io,vs)])
 
 -- Adds a new variable `Any` type to the current set of variable types.
 addVarAnyType :: Int -> VerifyStateM ()
-addVarAnyType v = addVarType (ioVarType v anyType)
+addVarAnyType v = addVarType v (ioVarType anyType)
 
 -- Removes an `Any` type for a given variable from the current
 -- set of variable types.
@@ -486,9 +493,15 @@ addVarAnyType v = addVarType (ioVarType v anyType)
 removeVarAnyType :: Int -> VerifyStateM ()
 removeVarAnyType v = do
   st <- get
-  put $ st { vstVarTypes = filter (not . isAnyTypeForV) (vstVarTypes st) }
+  let vtsmap = vstVarTypes st
+      vtsmap' = maybe vtsmap
+                      (\vts -> setVarTypeInMap v
+                                               (filter (not . isAnyIOType) vts)
+                                               vtsmap)
+                      (lookup v vtsmap)
+  put $ st { vstVarTypes = vtsmap' }
  where
-  isAnyTypeForV (var,vt,vs) = var == v &&
+  isAnyIOType (vt,vs) =
     case (vt,vs) of (IOT [([], at)], []) -> isAnyType at
                     _                    -> False
 
@@ -581,8 +594,8 @@ verifyFuncRule vs exp = do
    then printIfVerb 2 $ "not checked since trivial"
    else maybe (printIfVerb 2 $ "not checked since marked as always failing")
              (\atargs -> do
-                setVarTypes (map (\(v,at) -> (v, IOT [([],at)], []))
-                            (zip vs atargs))
+                setVarTypes (map (\(v,at) -> (v, [(IOT [([], at)], [])]))
+                                 (zip vs atargs))
                 showVarExpTypes
                 verifyExpr True exp
                 return ())
@@ -622,13 +635,13 @@ verifyExpr :: Bool -> Expr -> VerifyStateM Int
 verifyExpr verifyexp exp = case exp of
   Var v -> do iots <- if verifyexp then verifyVarExpr v exp
                                    else return [(v, IOT [([], anyType)], [])]
-              mapM addVarType iots
+              addVarTypes iots
               return v
   _     -> do v <- newFreshVarIndex
               addVarExps [(v,exp)]
               iots <- if verifyexp then verifyVarExpr v exp
                                    else return [(v, IOT [([], anyType)], [])]
-              mapM addVarType iots
+              addVarTypes iots
               return v
 
 -- Verify an expression identified by variable (first argument).
@@ -644,7 +657,7 @@ verifyVarExpr ve exp = case exp of
                        vtypes <- getVarTypesOf v
                        -- TODO: improve by handling equality constraint v==ve
                        -- instead of copying the current types for v to ve:
-                       return $ map (\ (_,iots,vs) -> (ve,iots,vs)) vtypes
+                       return $ map (\ (iots,vs) -> (ve,iots,vs)) vtypes
   Lit l         -> return [(ve, IOT [([], aLit l)], [])]
   Comb ct qf es -> checkDivOpNonZero exp $ do
     vs <- if isEncSearchOp qf
@@ -674,7 +687,7 @@ verifyVarExpr ve exp = case exp of
                       iotss <- mapM (\ (v,be) -> verifyVarExpr v be) bs
                       -- remove initially set anyType's for the bound vars:
                       mapM_ (removeVarAnyType . fst) bs
-                      mapM_ addVarType (concat iotss)
+                      addVarTypes (concat iotss)
                       mapM_ (addAnyTypeIfUnknown . fst) bs
                       verifyVarExpr ve e
   Free vs e     -> do addVarExps (map (\v -> (v, Var v)) vs)
@@ -810,8 +823,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
 
 -- Verify a branch where the first argument is the case argument variable
 -- and the second argument is the variable identifying the case expression.
-verifyBranch :: Int -> Int -> BranchExpr
-             -> VerifyStateM  [(Int, InOutType, [Int])]
+verifyBranch :: Int -> Int -> BranchExpr -> VerifyStateM  [VarType]
 verifyBranch casevar ve (Branch (LPattern l)    e) = do
   vts <- getVarTypes
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
@@ -830,7 +842,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   if isEmptyType casevartype
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
-            mapM_ (\(v,t) -> addVarType (ioVarType v t))
+            mapM_ (\(v,t) -> addVarType v (ioVarType t))
                   (zip vs (argTypesOfCons qc (length vs) casevartype))
             --mapM_ addVarAnyType vs
             iots <- verifyVarExpr ve e
@@ -838,14 +850,13 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
             return iots
 
 -- Gets the abstract type of a variable w.r.t. a set of variable types.
-getVarType :: Int -> [VarType] -> AType
-getVarType v viots =
-  let vts = filter (\ (rv, _, _) -> rv == v) viots
-  in if null vts
-       then error $ "Type of variable " ++ show v ++ " not found!"
-       else let rts = concatMap (\ (_, IOT iots, _) -> map snd iots) vts 
-            in if null rts then emptyType
-                           else foldr1 lubType rts
+getVarType :: Int -> VarTypesMap -> AType
+getVarType v vtsmap =
+  maybe (error $ "Type of variable " ++ show v ++ " not found!")
+        (\vts -> let rts = concatMap (\ (IOT iots, _) -> map snd iots) vts 
+                 in if null rts then emptyType
+                                else foldr1 lubType rts)
+        (lookup v vtsmap)
 
 ------------------------------------------------------------------------------
 --- Computes for a given set of function declarations in a module
@@ -878,8 +889,5 @@ anyTypes n = take n (repeat anyType)
 
 ------------------------------------------------------------------------------
 -- Utilities
-
-fst3 :: (a,b,c) -> a
-fst3 (x,_,_) = x
 
 ------------------------------------------------------------------------------
