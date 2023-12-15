@@ -1,0 +1,50 @@
+MODULE 'ArithDiv' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+g: <FAILING>
+
+MODULE 'DataList' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+init: {:}
+last: {:}
+myhead: {:}
+mytail: {:}
+
+MODULE 'DepthkDomain' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+falseTail: <FAILING>
+just01: <FAILING>
+mainFT: <FAILING>
+
+MODULE 'EncapSearch' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+hd: {:}
+hdfree: <FAILING>
+head: {:}
+
+MODULE 'Equality' VERIFIED
+
+MODULE 'InfLists' VERIFIED
+
+MODULE 'InferCallTypes' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+g: {True}
+h: {True}
+isTrue: {True}
+j1: <FAILING>
+j2: ({True}, {False})
+j3: ({True}, {False})
+k: ({True}, {True})
+maxList: (_, {:})
+trueFalse: ({True}, {False})
+trueTrue: ({True}, {True})
+
+MODULE 'Risers' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+risers2: (_, _, {:})
+
+MODULE 'SetFuns' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+head: {:}
+headHasHead: {:}
+
+MODULE 'Split' VERIFIED
+
+MODULE 'TestSuccess' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+k: {0,1}
+myhead: {:}
+solve: {True}
+unreachBranch: {True}
+

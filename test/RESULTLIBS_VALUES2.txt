@@ -1,0 +1,77 @@
+MODULE 'Prelude' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+!!: <FAILING>
+&: (True, True)
+&>: (True, _)
+=:<=: <FAILING>
+=:=: <FAILING>
+_impl#**#Prelude.Floating#Prelude.Float: <FAILING>
+_impl#/#Prelude.Fractional#Prelude.Float: <FAILING>
+_impl#ceiling#Prelude.RealFrac#Prelude.Float: <FAILING>
+_impl#div#Prelude.Integral#Prelude.Int: <FAILING>
+_impl#divMod#Prelude.Integral#Prelude.Int: <FAILING>
+_impl#enumFrom#Prelude.Enum#Prelude.Bool: <FAILING>
+_impl#enumFrom#Prelude.Enum#Prelude.Char: <FAILING>
+_impl#enumFrom#Prelude.Enum#Prelude.Ordering: <FAILING>
+_impl#enumFromThen#Prelude.Enum#Prelude.Bool: <FAILING>
+_impl#enumFromThen#Prelude.Enum#Prelude.Char: <FAILING>
+_impl#enumFromThen#Prelude.Enum#Prelude.Ordering: <FAILING>
+_impl#enumFromThenTo#Prelude.Enum#Prelude.Bool: <FAILING>
+_impl#enumFromThenTo#Prelude.Enum#Prelude.Char: <FAILING>
+_impl#enumFromThenTo#Prelude.Enum#Prelude.Ordering: <FAILING>
+_impl#enumFromTo#Prelude.Enum#Prelude.Bool: <FAILING>
+_impl#enumFromTo#Prelude.Enum#Prelude.Char: <FAILING>
+_impl#enumFromTo#Prelude.Enum#Prelude.Ordering: <FAILING>
+_impl#floor#Prelude.RealFrac#Prelude.Float: <FAILING>
+_impl#logBase#Prelude.Floating#Prelude.Float: <FAILING>
+_impl#mod#Prelude.Integral#Prelude.Int: <FAILING>
+_impl#pred#Prelude.Enum#(): <FAILING>
+_impl#pred#Prelude.Enum#Prelude.Bool: True
+_impl#pred#Prelude.Enum#Prelude.Char: <FAILING>
+_impl#pred#Prelude.Enum#Prelude.Ordering: {EQ, GT}
+_impl#quot#Prelude.Integral#Prelude.Int: <FAILING>
+_impl#quotRem#Prelude.Integral#Prelude.Int: <FAILING>
+_impl#recip#Prelude.Fractional#Prelude.Float: <FAILING>
+_impl#rem#Prelude.Integral#Prelude.Int: <FAILING>
+_impl#sqrt#Prelude.Floating#Prelude.Float: <FAILING>
+_impl#succ#Prelude.Enum#(): <FAILING>
+_impl#succ#Prelude.Enum#Prelude.Bool: False
+_impl#succ#Prelude.Enum#Prelude.Char: <FAILING>
+_impl#succ#Prelude.Enum#Prelude.Ordering: {EQ, LT}
+_impl#toEnum#Prelude.Enum#(): 0
+_impl#toEnum#Prelude.Enum#Prelude.Bool: {0, 1}
+_impl#toEnum#Prelude.Enum#Prelude.Ordering: {0, 1, 2}
+_inst#Prelude.Enum#(): <FAILING>
+_inst#Prelude.Enum#Prelude.Bool: <FAILING>
+_inst#Prelude.Enum#Prelude.Char: <FAILING>
+_inst#Prelude.Enum#Prelude.Ordering: <FAILING>
+_inst#Prelude.Floating#Prelude.Float: <FAILING>
+_inst#Prelude.Fractional#Prelude.Float: <FAILING>
+_inst#Prelude.Integral#Prelude.Int: <FAILING>
+_inst#Prelude.RealFrac#Prelude.Float: <FAILING>
+anyOf: _:_
+cond: (True, _)
+div: <FAILING>
+doSolve: True
+failed: <FAILING>
+foldl1: (_, _:_)
+foldr1: (_, _:_)
+head: _:_
+mod: <FAILING>
+quot: <FAILING>
+rem: <FAILING>
+showTuple: _:_
+solve: True
+tail: _:_
+
+MODULE 'Data.Maybe' VERIFIED
+
+MODULE 'Data.List' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+cycle: _:_
+init: _:_
+last: _:_
+maximum: (_, _:_)
+maximumBy: (_, _:_)
+minimum: (_, _:_)
+minimumBy: (_, _:_)
+transpose: <FAILING>
+
