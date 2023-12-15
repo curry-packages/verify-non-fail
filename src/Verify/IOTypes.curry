@@ -230,9 +230,11 @@ showVarTypes :: TermDomain a => VarTypesMap a  -> String
 showVarTypes = unlines . map showVarType
  where
   showVarType (rv, vts) =
-    'v' : show rv ++ ": " ++
-    intercalate "  ||  "
-      (map (\(iot,argvs) -> showIOT iot ++ " " ++ showArgumentVars argvs) vts)
+    let vstr = 'v' : show rv ++ ": "
+    in vstr ++
+       intercalate ('\n' : take (length vstr) (repeat ' '))
+         (map (\(iot,argvs) -> showIOT iot ++ " " ++ showArgumentVars argvs)
+              vts)
 
 --- Shows a list of argument variables in parentheses.
 showArgumentVars :: [Int] -> String
