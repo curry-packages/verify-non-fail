@@ -367,10 +367,6 @@ setCurrentFunc qf ar vs = do
 getAllCons :: VerifyStateM [[(QName,Int)]]
 getAllCons = get >>= return . vstAllCons
 
--- Gets the current fresh variable index of the state.
-getFreshVarIndex :: VerifyStateM Int
-getFreshVarIndex = get >>= return . vstFreshVar
-
 -- Sets the fresh variable index in the state.
 setFreshVarIndex :: Int -> VerifyStateM ()
 setFreshVarIndex fvi = do
@@ -380,7 +376,7 @@ setFreshVarIndex fvi = do
 -- Gets a new fresh variable index.
 newFreshVarIndex :: VerifyStateM Int
 newFreshVarIndex = do
-  v <- getFreshVarIndex
+  v <- fmap vstFreshVar get
   setFreshVarIndex (v + 1)
   return v
 
