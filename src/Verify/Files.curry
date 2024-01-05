@@ -7,7 +7,7 @@
 --- is usually `~/.curry_verifycache/...`.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version December 2023
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -30,6 +30,7 @@ import AbstractCurry.Types hiding ( pre )
 import Analysis.TermDomain  ( TermDomain )
 import Contract.Names       ( decodeContractName, encodeContractName )
 import Data.Time            ( ClockTime, compareClockTime )
+import FlatCurry.Types      ( Expr )
 import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
                             , modNameToPath )
 import System.Directory
@@ -100,6 +101,10 @@ getRealPath path = do
 getCallTypesFile :: Options -> String -> IO String
 getCallTypesFile opts mname = getVerifyCacheBaseFile opts mname "CALLTYPES"
 
+-- Gets the name of the file containing non-fail conditions of a module.
+getNonFailCondFile :: Options -> String -> IO String
+getNonFailCondFile opts mname = getVerifyCacheBaseFile opts mname "NONFAIL"
+
 -- Gets the name of the file containing all input/output types of a module.
 getIOTypesFile :: Options -> String -> IO String
 getIOTypesFile opts mname = getVerifyCacheBaseFile opts mname "IOTYPES"
@@ -113,23 +118,28 @@ callTypesModule :: String -> String
 callTypesModule mname = mname ++ "_CALLTYPES"
 
 ------------------------------------------------------------------------------
--- Stores call types and input/output types for a module.
+--- Stores constructores, call types, non-fail conditions
+---  and input/output types for a module.
 storeTypes :: TermDomain a => Options
            -> String                 -- module name
            -> [[(QName,Int)]]        -- all constructors grouped by type
            -> [(QName,ACallType a)]  -- all inferred abstract call types
+           -> [(QName,[Expr])]       -- inferred non-fail conditions
            -> [(QName,InOutType a)]  -- all input output types
            -> IO ()
-storeTypes opts mname allcons acalltypes iotypes = do
+storeTypes opts mname allcons acalltypes funconds iotypes = do
   patfile <- getVerifyCacheBaseFile opts mname "..."
   printWhenAll opts $ "Caching analysis results at '" ++ patfile ++ "'"
   createDirectoryIfMissing True (dropFileName patfile)
-  csfile  <- getConsTypesFile opts mname
-  ctfile  <- getCallTypesFile opts mname
-  iofile  <- getIOTypesFile   opts mname
+  csfile  <- getConsTypesFile   opts mname
+  ctfile  <- getCallTypesFile   opts mname
+  nffile  <- getNonFailCondFile opts mname
+  iofile  <- getIOTypesFile     opts mname
   writeFileAndReport csfile (show allcons)
   writeFileAndReport ctfile
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
+  writeFileAndReport nffile
+    (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod funconds)))
   writeFileAndReport iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
   --when (optModule opts) $
@@ -142,58 +152,68 @@ storeTypes opts mname allcons acalltypes iotypes = do
   
   filterMod xs = filter (\ ((mn,_),_) -> mn == mname) xs
 
--- Try to read constructors, call types, and
+-- Try to read constructors, call types, non-fail conditions, and
 -- input/output types for a given module.
 -- If the data files do not exist or are older than the source of the
 -- module, `Nothing` is returned.
 tryReadTypes :: TermDomain a => Options -> String
-  -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType a)], [(QName,InOutType a)]))
+  -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType a)],
+                 [(QName,[Expr])], [(QName,InOutType a)]))
 tryReadTypes opts mname = do
-  csfile   <- getConsTypesFile opts mname
-  ctfile   <- getCallTypesFile opts mname
-  iofile   <- getIOTypesFile   opts mname
+  csfile   <- getConsTypesFile   opts mname
+  ctfile   <- getCallTypesFile   opts mname
+  nffile   <- getNonFailCondFile opts mname
+  iofile   <- getIOTypesFile     opts mname
   csexists <- doesFileExist csfile
   ctexists <- doesFileExist ctfile
+  nfexists <- doesFileExist nffile
   ioexists <- doesFileExist iofile
-  if not (csexists && ctexists && ioexists)
+  if not (csexists && ctexists && ioexists && nfexists)
     then return Nothing
     else do
       srctime <- getModuleModTime mname
       cstime  <- getModificationTime csfile
       cttime  <- getModificationTime ctfile
+      nftime  <- getModificationTime nffile
       iotime  <- getModificationTime iofile
-      if compareClockTime cstime  srctime == GT &&
+      if compareClockTime cstime srctime == GT &&
          compareClockTime cttime srctime == GT &&
-         compareClockTime iotime  srctime == GT
+         compareClockTime nftime srctime == GT &&
+         compareClockTime iotime srctime == GT
         then fmap Just (readTypes opts mname)
         else return Nothing
 
 -- Reads constructors, abstract call types, and input/output types
 -- for a given module.
 readTypes :: TermDomain a => Options -> String
-          -> IO ([[(QName,Int)]], [(QName,ACallType a)], [(QName,InOutType a)])
+          -> IO ([[(QName,Int)]], [(QName,ACallType a)],
+                 [(QName,[Expr])], [(QName,InOutType a)])
 readTypes opts mname = do
-  csfile <- getConsTypesFile opts mname
-  ctfile <- getCallTypesFile opts mname
-  iofile <- getIOTypesFile   opts mname
+  csfile <- getConsTypesFile   opts mname
+  ctfile <- getCallTypesFile   opts mname
+  nffile <- getNonFailCondFile opts mname
+  iofile <- getIOTypesFile     opts mname
   conss  <- readFile csfile >>= return . read
   cts    <- readFile ctfile >>= return . map read . lines
+  nfcs   <- readFile nffile >>= return . map read . lines
   iots   <- readFile iofile >>= return . map read . lines
   return (conss,
-          map (\ (fn,ct) -> ((mname,fn), ct)) cts,
+          map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
+          map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs,
           map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots)
 
---- Reads constructors, call types, and input/output types
+--- Reads constructors, call types, non-fail conditions, and input/output types
 --- for a given list of modules.
---- If some of the data files do not exists or are not newer
+--- If some of the data files does not exist or is not newer
 --- than the module source, the operation provided as the second argument
 --- is applied before reading the files.
 readTypesOfModules :: TermDomain a => Options
   -> (Options -> String -> IO ()) -> [String]
-  -> IO ([[(QName,Int)]], [(QName, ACallType a)], [(QName, InOutType a)])
+  -> IO ([[(QName,Int)]], [(QName, ACallType a)],
+         [(QName,[Expr])], [(QName, InOutType a)])
 readTypesOfModules opts computetypes mnames = do
-  (xs,ys,zs) <- mapM tryRead mnames >>= return . unzip3
-  return (concat xs, concat ys, concat zs)
+  (xs,ys,zs, ws) <- mapM tryRead mnames >>= return . unzip4
+  return (concat xs, concat ys, concat zs, concat ws)
  where
   tryRead mname =
     tryReadTypes opts mname >>=
@@ -205,6 +225,12 @@ readTypesOfModules opts computetypes mnames = do
                                mname ++ "'")
                       return)
           return
+
+--- Transforms a list of triples into a triple of lists.
+unzip4 :: [(a, b, c, d)] -> ([a], [b], [c], [d])
+unzip4 []             = ([], [], [], [])
+unzip4 ((x, y, z, w) : ts) = (x : xs, y : ys, z : zs, w : ws)
+ where (xs, ys, zs, ws) = unzip4 ts
 
 --- Reads the possibly previously inferred abstract call types for a
 --- given module if it is up-to-date (where the modification time

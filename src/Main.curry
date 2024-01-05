@@ -5,13 +5,14 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version December 2023
+--- @version January 2024
 -------------------------------------------------------------------------
 
 module Main where
 
 import Control.Monad               ( unless, when )
 import Curry.Compiler.Distribution ( curryCompiler )
+import Data.Char                   ( toLower )
 import Data.List
 import System.Environment          ( getArgs )
 
@@ -30,13 +31,13 @@ import Debug.Profile
 import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.NormalizeLet
-import qualified FlatCurry.Pretty as FCP
+import FlatCurry.Print
 import FlatCurry.Types
 import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist
                                   , removeDirectory )
 import System.FilePath            ( (</>) )
-import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
+import System.Path                ( fileInPath )
 
 -- Imports from package modules:
 import Verify.CallTypes
@@ -45,6 +46,10 @@ import Verify.Helpers
 import Verify.IOTypes
 import Verify.Options
 import Verify.Statistics
+import Verify.WithSMT
+
+import FlatCurry.Build hiding ( pre )
+import FlatCurry.Simplify         ( simpExpr )
 
 import qualified Main_NONGENERIC -- workaround for KiCS2
 
@@ -52,7 +57,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 12/12/23)"
+  bannerText = "Curry Call Pattern Verifier (Version of 05/01/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -85,7 +90,13 @@ main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
 --- Verify a single module.
 verifyModule :: TermDomain a => Analysis a -> IORef (AnalysisStore a)
              -> Options -> String -> IO ()
-verifyModule valueanalysis astore opts mname = do
+verifyModule valueanalysis astore opts0 mname = do
+  z3exists <- fileInPath "z3"
+  let z3msg = "Option '--nosmt' activated since SMT solver Z3 not found in PATH!"
+  opts <- if z3exists
+            then return opts0
+            else do putStrLn z3msg
+                    return opts0 { optSMT = False }
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- readFlatCurry mname >>= return . transformChoiceInProg
   let fdecls       = progFuncs flatprog
@@ -94,14 +105,14 @@ verifyModule valueanalysis astore opts mname = do
       numvisfuncs  = length visfuncs
       visfuncset   = Set.fromList visfuncs
       isVisible qf = Set.member qf visfuncset
-  imps@(impconss,impacalltypes,impiotypes) <-
+  imps@(impconss,impacalltypes,impnftypes,impiotypes) <-
     if optImports opts
       then do
-        whenStatus opts $ putStr $
-          "Reading abstract types of imports: " ++ unwords (progImports flatprog)
+        whenStatus opts $ putStr $ "Reading abstract types of imports: " ++
+          unwords (progImports flatprog)
         readTypesOfModules opts (verifyModule valueanalysis astore)
                            (progImports flatprog)
-      else return ([],[],[])
+      else return ([],[],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
                   else printWhenStatus opts ""
@@ -114,7 +125,9 @@ verifyModule valueanalysis astore opts mname = do
   (iotypes, numntiotypes, numpubntiotypes) <- id $!!
     inferIOTypes opts valueanalysis astore isVisible flatprog
 
-  let vstate = initVerifyState fdecls allcons (Map.fromList impacalltypes)
+  let vstate = initVerifyState mname fdecls allcons
+                               (Map.fromList impacalltypes)
+                               (Map.fromList impnftypes)
                                (Map.fromList acalltypes)
                                (Map.fromList (iotypes ++ impiotypes)) opts
       funusage = funcDecls2Usage mname (progFuncs flatprog)
@@ -132,7 +145,7 @@ verifyModule valueanalysis astore opts mname = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       showVerifyResult opts st mname isVisible
+       printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -149,7 +162,7 @@ verifyModule valueanalysis astore opts mname = do
                             finalntacalltypes (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
-    storeTypes opts mname modcons finalacalltypes iotypes
+    storeTypes opts mname modcons finalacalltypes (vstFunConds vst) iotypes
     storeStatistics opts mname stattxt statcsv
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
 
@@ -238,25 +251,49 @@ tryVerifyProg :: TermDomain a => Options -> Int -> VerifyState a -> String
               -> IO (Int,VerifyState a)
 tryVerifyProg opts numits vstate mname funusage fdecls = do
   st <- execStateT (mapM_ verifyFunc fdecls) vstate
-  let newfailures = vstNewFailed st
+  -- remove NewFailed information about unchanged operations
+  -- (usually, these are failed operations with changed conditions)
+  let newfailures = filter (\(qf,ct) -> maybe True (\fct -> ct /= fct)
+                                          (Map.lookup qf (vstCallTypes st)))
+                           (vstNewFailed st)
   unless (null newfailures || optVerb opts < 2) $ printFailures st
   unless (null newfailures) $ printWhenStatus opts $ unlines $
     "Operations with refined call types (used in future analyses):" :
     showFunResults prettyFunCallAType (reverse newfailures)
   let newcts = Map.union (Map.fromList newfailures) (vstCallTypes st)
   enforceNormalForm newcts
-  let st' = st { vstCallTypes = newcts, vstNewFailed = [] }
-  if null newfailures
+  let newconds = vstNewFunConds st
+      (failconds,refineconds) =
+         partition (\(qf,_) -> qf `elem` (map fst (vstFunConds st)))
+                   newconds
+      newfailconds = filter (\(qf,_) -> (qf,[fcFalse]) `notElem` vstFunConds st)
+                            failconds
+      -- Condition for next iteration: set already existing conditions to
+      -- `False` to avoid infinite refinements
+      nextfunconds = (unionBy (\x y -> fst x == fst y)
+                              (map (\(qf,_) -> (qf, [fcFalse])) newfailconds)
+                              (vstFunConds st)) ++ refineconds
+      newrefineconds = newfailconds ++ refineconds
+  unless (null newrefineconds) $ printWhenStatus opts $
+    "Operations with refined call conditions (used in future analyses):\n" ++
+    showConditions (vstFuncDecls st) newrefineconds
+  let st' = st { vstCallTypes = newcts, vstNewFailed = []
+               , vstFunConds = nextfunconds, vstNewFunConds = [] }
+  if null newfailures && null newrefineconds
     then do printFailures st'
-            return (numits + 1, st')
+            -- remove always failing conditions (since the call types are
+            -- always failing for such functions):
+            let st'' = st' { vstFunConds =
+                               filter ((/= [fcFalse]) . snd) nextfunconds }
+            return (numits + 1, st'')
     else do
       let -- functions with refined call types:
           rfuns = map fst (filter (not . isFailACallType . snd) newfailures)
           newfdecls =
             foldr unionFDecls
               (filter (\fd -> funcName fd `elem` rfuns) (vstFuncDecls st))
-              (map (\ (qf,_) -> maybe [] id (Map.lookup qf funusage))
-                   newfailures)
+              (map (\qf -> maybe [] id (Map.lookup qf funusage))
+                   (union (map fst newfailures) (map fst newrefineconds)))
       printWhenStatus opts $ "Repeat verification with new call types..." ++
         "(" ++ show (length newfdecls) ++ " functions)"
       --putStrLn $ unlines $
@@ -278,9 +315,35 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
            (map (\ (qf,_,e,cs) -> showIncompleteBranch qf e cs)
                 (reverse (vstPartialBranches st)) ++ [failLine])
 
-showVerifyResult :: TermDomain a => Options -> VerifyState a -> String
-                 -> (QName -> Bool) -> IO ()
-showVerifyResult opts vst mname isvisible = do
+-- Prints a list of conditions for operations (if not empty).
+-- The first argument contains all function declarations of the current module.
+showConditions :: [FuncDecl] -> [(QName, [Expr])] -> String
+showConditions fdecls = unlines . map showCond
+ where
+  showCond (qf,cnd) =
+    let fdecl = maybe (error $
+                       "showCondition: function '" ++ snd qf ++ "'' not found!")
+                      id
+                      (find (\fd -> funcName fd == qf) fdecls)
+    in "\n" ++ showFuncDecl (genNonFailFunction fdecl cnd)
+
+-- Generates the function representing the non-fail condition for a given
+-- function and non-fail condition.
+genNonFailFunction :: FuncDecl -> [Expr] -> FuncDecl
+genNonFailFunction (Func (mn,fn) ar vis texp _) cnd =
+  Func (mn,fn++"'nonfail") ar vis (nftype [1..ar] texp)
+       (Rule [1..ar] (simpExpr (fcAnds cnd)))
+ where
+  nftype []     _     = TCons (pre "Bool") []
+  nftype (v:vs) ftype = case ftype of
+    FuncType t1 t2 -> FuncType t1 (nftype vs t2)
+    ForallType _ t -> nftype (v:vs) t
+    _              -> error "Illegal function type in genNonFailFunction"
+
+-- Prints a message about the result of the module verification.
+printVerifyResult :: TermDomain a => Options -> VerifyState a -> String
+                  -> (QName -> Bool) -> IO ()
+printVerifyResult opts vst mname isvisible = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
                             (Map.toList (vstCallTypes vst))
@@ -288,6 +351,10 @@ showVerifyResult opts vst mname isvisible = do
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
            : showFunResults prettyFunCallAType (sortFunResults calltypes)
+  let funconds = vstFunConds vst
+  unless (null funconds) $
+    putStrLn $ "INFERRED CONDITIONS DUE TO FAILING FUNCTIONS:\n" ++
+               showConditions (vstFuncDecls vst) funconds
  where
   showFun qf = not (optPublic opts) || isvisible qf
 
@@ -322,45 +389,68 @@ showIncompleteBranch qf e [] =
 -- It is parameterized over the abstract term domain.
 data VerifyState a = VerifyState
   { vstFuncDecls   :: [FuncDecl]        -- all function declarations of module
-  , vstCurrFunc    :: (QName,Int,[Int]) -- the name/arity/args of current func.
+  , vstCurrFunc    :: (QName,Int,TypeExpr,[Int])
+                      -- the name/arity/type/args of current function
   , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,Expr)]      -- map variable to its subexpression
   , vstVarTypes    :: VarTypesMap a     -- map variable to its abstract types
+  , vstCondition   :: [Expr] -- conjunction of current (non-type) condition
   , vstImpCallTypes:: Map.Map QName (ACallType a) -- call types of imports
   , vstCallTypes   :: Map.Map QName (ACallType a) -- call types of module
   , vstIOTypes     :: Map.Map QName (InOutType a) -- in/out type for all funcs
   , vstFailedFuncs :: [(QName,Int,Expr)]   -- functions with illegal calls
   , vstPartialBranches :: [(QName,Int,Expr,[QName])] -- incomplete branches
   , vstNewFailed   :: [(QName,ACallType a)] -- new failed function call types
+  , vstImpFunConds :: Map.Map QName [Expr]  -- call conditions of imports
+  , vstFunConds    :: [(QName,[Expr])]      -- call conditions of functions
+  , vstNewFunConds :: [(QName,[Expr])]      -- functions with new call conds
   , vstStats       :: (Int,Int) -- numbers: non-trivial calls / incomplete cases
   , vstToolOpts    :: Options
   }
 
 --- Initializes the verification state.
-initVerifyState :: TermDomain a => [FuncDecl] -> [[(QName,Int)]]
-                -> Map.Map QName (ACallType a) -> Map.Map QName (ACallType a)
+initVerifyState :: TermDomain a => String -> [FuncDecl] -> [[(QName,Int)]]
+                -> Map.Map QName (ACallType a) -> Map.Map QName [Expr]
+                -> Map.Map QName (ACallType a)
                 -> Map.Map QName (InOutType a) -> Options
                 -> VerifyState a
-initVerifyState fdecls allcons impacalltypes acalltypes ftypes opts =
-  VerifyState fdecls (("",""),0,[]) allcons 0 [] []
-              impacalltypes acalltypes ftypes [] [] [] (0,0) opts
+initVerifyState mname fdecls allcons impacalltypes impfconds acalltypes
+                iotypes opts =
+  VerifyState fdecls (("",""),0,TVar 0,[]) allcons 0 [] [] []
+              impacalltypes nfacalltypes iotypes [] [] []
+              impfconds nonfailconds []
+              (0,0) opts
+ where
+  nonfailconds = nonFailCondsOfModule mname
+
+  -- set the call types of operations with non-fail conditions to "failed"
+  nfacalltypes = Map.insertList
+                   (map (\(qf,_) -> (qf, failACallType)) nonfailconds)
+                   acalltypes
 
 -- The type of the state monad contains the verification state.
 --type TransStateM a = State TransState a
 type VerifyStateM atype a = StateT (VerifyState atype) IO a
 
+-- Sets the name and arity of the current function in the state.
+setCurrentFunc :: TermDomain a => QName -> Int -> TypeExpr -> [Int] -> VerifyStateM a ()
+setCurrentFunc qf ar ftype vs = do
+  st <- get
+  put $ st { vstCurrFunc = (qf,ar,ftype,vs) }
+
 -- Gets the name of the current function in the state.
 getCurrentFuncName :: TermDomain a => VerifyStateM a QName
 getCurrentFuncName = do
   st <- get
-  return $ let (qf,_,_) = vstCurrFunc st in qf
+  return $ let (qf,_,_,_) = vstCurrFunc st in qf
 
--- Sets the name and arity of the current function in the state.
-setCurrentFunc :: TermDomain a => QName -> Int -> [Int] -> VerifyStateM a ()
-setCurrentFunc qf ar vs = do
+-- Gets the arguments and their types of the current function.
+getCurrentArgTypes :: TermDomain a => VerifyStateM a [(Int,TypeExpr)]
+getCurrentArgTypes = do
   st <- get
-  put $ st { vstCurrFunc = (qf,ar,vs) }
+  let (_,_,ftype,vs) = vstCurrFunc st
+  return (funcType2TypedVars vs ftype)
 
 -- Gets all constructors grouped by types.
 getAllCons :: TermDomain a => VerifyStateM a [[(QName,Int)]]
@@ -392,17 +482,54 @@ addCallTypeRestriction qf ctype = do
                                              [(qf,newct)] (vstNewFailed st) })
         (lookup qf (vstNewFailed st))
 
+-- Adds the condition (provided as the second argument as a FlatCurry
+-- expression) to the call condition for the current function (first argument)
+-- so that it will be used in the next iteration.
+-- If there is already a new refined call condition, they will be combined.
+-- If the condition is `True`, i.e., the call condition cannot be refined,
+-- then the current branch condition will be negated and added
+-- so that the current branch is not reachable.
+-- Furthermore, the call type of the current function is set to
+-- always failing.
+addConditionRestriction :: TermDomain a => QName -> Expr -> VerifyStateM a ()
+addConditionRestriction qf cond = do
+  st <- get
+  when (optSMT (vstToolOpts st)) $ do
+    bcond <- getExpandedCondition
+    let newcond = if cond == fcTrue
+                    then simpExpr $ fcNot (fcAnds bcond)
+                    else -- the current branch condition implies the condition:
+                         fcOr (fcNot (fcAnds bcond)) cond
+    printIfVerb 2 $ "New call condition for function '" ++ snd qf ++ "': " ++
+                    showExp newcond
+    -- check the satisfiability of the new condition:
+    vtypes <- getCurrentArgTypes
+    unsat <- isUnsatisfiable vtypes newcond
+    when unsat $ printIfVerb 2 $ "...is unsatisfiable"
+    let newconds = if unsat then [fcFalse] else [newcond]
+    maybe (put $ st { vstNewFunConds = (qf,newconds) : (vstNewFunConds st) } )
+          (\prevcond -> do
+            let newct = union prevcond newconds
+            put $ st { vstNewFunConds = unionBy (\x y -> fst x == fst y)
+                                          [(qf,newct)] (vstNewFunConds st) })
+          (lookup qf (vstNewFunConds st))
+  addCallTypeRestriction qf failACallType
+
 -- Adds a failed function call (represented by the FlatCurry expression)
 -- to the current function. If the second argument is `Just vts`, then
 -- this call is not failed provided that it can be ensured that the
 -- variable types `vts` hold. This information is used to refine the
 -- call type of the current function, if possible.
-addFailedFunc :: TermDomain a => Expr -> Maybe [(Int,a)] -> VerifyStateM a ()
-addFailedFunc exp mbvts = do
+-- Similarly, this call is not failed provided that the third argument
+-- (a condition represented as a FlatCurry expression) is not failed so that
+-- this condition is also used to refine the call condition of the current
+-- function.
+addFailedFunc :: TermDomain a => Expr -> Maybe [(Int,a)] -> Expr -> VerifyStateM a ()
+addFailedFunc exp mbvts cond = do
   st <- get
-  let (qf,ar,args) = vstCurrFunc st
+  let (qf,ar,_,args) = vstCurrFunc st
   put $ st { vstFailedFuncs = union [(qf,ar,exp)] (vstFailedFuncs st) }
-  maybe (addCallTypeRestriction qf failACallType)
+  maybe (addConditionRestriction qf cond)
         (\vts ->
            if any ((`elem` args) . fst) vts
              then do
@@ -424,13 +551,13 @@ addFailedFunc exp mbvts = do
  where
   noRefinementFor qf = do
     printIfVerb 2 $ "CANNOT REFINE CALL TYPE OF FUNCTION " ++ snd qf
-    addCallTypeRestriction qf failACallType
+    addConditionRestriction qf cond
 
 -- Adds an info about cases with missing branches in the current function.
 addMissingCase :: TermDomain a => Expr -> [QName] -> VerifyStateM a ()
 addMissingCase exp qcs = do
   st <- get
-  let (qf,ar,_) = vstCurrFunc st
+  let (qf,ar,_,_) = vstCurrFunc st
   put $
     st { vstPartialBranches = union [(qf,ar,exp,qcs)] (vstPartialBranches st) }
   addCallTypeRestriction qf failACallType
@@ -501,7 +628,48 @@ removeVarAnyType v = do
     case (vt,vs) of (IOT [([], at)], []) -> isAnyType at
                     _                    -> False
 
--- Gets the abstract call type for a given operation.
+-- Gets current condition.
+getCondition :: TermDomain a => VerifyStateM a [Expr]
+getCondition = fmap vstCondition get
+
+-- Gets expanded current branch condition.
+getExpandedCondition :: TermDomain a => VerifyStateM a [Expr]
+getExpandedCondition = do
+  st <- get
+  return $ map (expandExpr (vstVarExp st)) (vstCondition st)
+
+-- Sets the current condition.
+setCondition :: TermDomain a => [Expr] -> VerifyStateM a ()
+setCondition exps = do
+  st <- get
+  put $ st { vstCondition = exps }
+
+-- Adds a conjunct to the current condition.
+addCondition :: TermDomain a => Expr -> VerifyStateM a ()
+addCondition exp = do
+  st <- get
+  put $ st { vstCondition = exp : vstCondition st }
+
+-- Adds an equality between a variable and an expression as a conjunct
+-- to the current condition.
+addEquVarCondition :: TermDomain a => Int -> Expr -> VerifyStateM a ()
+addEquVarCondition var exp = do
+  let conj = if exp == fcTrue
+               then Var var
+               else if exp == fcFalse
+                      then fcNot (Var var)
+                      else Comb FuncCall (pre "==") [Var var, exp]
+  addCondition conj
+
+-- Gets the call condition of a given operation.
+getCallConditionOf :: TermDomain a => QName -> VerifyStateM a [Expr]
+getCallConditionOf qf = do
+  st <- get
+  return $ maybe (maybe [] id (Map.lookup qf (vstImpFunConds st)))
+                 id
+                 (lookup qf (vstFunConds st))
+
+-- Gets the abstract call type of a given operation.
 -- The trivial abstract call type is returned for encapsulated search operations.
 getCallType :: TermDomain a => QName -> Int -> VerifyStateM a (ACallType a)
 getCallType qf ar
@@ -564,9 +732,9 @@ printIfVerb v s = do
 
 -- Verify a FlatCurry function declaration.
 verifyFunc :: TermDomain a => FuncDecl -> VerifyStateM a ()
-verifyFunc (Func qf ar _ _ rule) = case rule of
+verifyFunc (Func qf ar _ ftype rule) = case rule of
   Rule vs exp -> unless (qf `elem` noVerifyFunctions) $ do
-                   setCurrentFunc qf ar vs
+                   setCurrentFunc qf ar ftype vs
                    verifyFuncRule vs (normalizeLet exp)
   External _  -> return ()
 
@@ -583,19 +751,29 @@ verifyFuncRule vs exp = do
   setFreshVarIndex (maximum (0 : vs ++ allVars exp) + 1)
   setVarExps  (map (\v -> (v, Var v)) vs)
   qf <- getCurrentFuncName
+  fcond <- getCallConditionOf qf
+  setCondition fcond
   printIfVerb 2 $ "CHECKING FUNCTION " ++ snd qf
   ctype    <- getCallType qf (length vs)
   rhstypes <- mapM (\f -> getCallType f 0) (funcsInExpr exp)
   if all isTotalACallType (ctype:rhstypes)
-   then printIfVerb 2 $ "not checked since trivial"
-   else maybe (printIfVerb 2 $ "not checked since marked as always failing")
-             (\atargs -> do
-                setVarTypes (map (\(v,at) -> (v, [(IOT [([], at)], [])]))
-                                 (zip vs atargs))
-                showVarExpTypes
-                verifyExpr True exp
-                return ())
-        ctype
+    then printIfVerb 2 $ "not checked since trivial"
+    else maybe (if null fcond
+                  then printIfVerb 2 $
+                         "not checked since marked as always failing"
+                  else do
+                    setVarTypes (map (\v -> (v, [(IOT [([], anyType)], [])]))
+                                     vs)
+                    showVarExpTypes
+                    verifyExpr True exp
+                    return () )
+               (\atargs -> do
+                  setVarTypes (map (\(v,at) -> (v, [(IOT [([], at)], [])]))
+                                   (zip vs atargs))
+                  showVarExpTypes
+                  verifyExpr True exp
+                  return ())
+               ctype
   printIfVerb 2 $ take 70 (repeat '-')
 
 -- Shows the current variable expressions and types if verbosity > 2.
@@ -610,18 +788,8 @@ showVarExpTypes = do
                     unlines (map (\ (v,e) -> showBindExp v e) (vstVarExp st))
     vartypes <- getVarTypes
     lift $ putStr $ "Variable types\n" ++ showVarTypes vartypes
-
--- Shows a pretty-printed variable binding to a FlatCurry expression.
-showBindExp :: Int -> Expr -> String
-showBindExp bv e = pPrint $ text ('v' : show bv ++ " |-> ") <+> align (ppExp e)
-
--- Shows a pretty-printed FlatCurry expression.
-showExp :: Expr -> String
-showExp e = pPrint (ppExp e)
-
--- Pretty prints a FlatCurry expression.
-ppExp :: Expr -> Doc
-ppExp e = FCP.ppExp FCP.defaultOptions { FCP.qualMode = FCP.QualNone} e
+    cond <- getCondition
+    lift $ putStrLn $ "Current condition: " ++ showSimpExp (fcAnds cond)
 
 -- Verify an expression (if the first argument is `True`) and,
 -- if the expression is not a variable, create a fresh
@@ -665,8 +833,7 @@ verifyVarExpr ve exp = case exp of
                              (zip [0..] es)
                    else mapM (verifyExpr True) es
     case ct of
-      FuncCall -> do opts <- getToolOptions
-                     verifyFuncCall (optError opts) exp qf vs
+      FuncCall -> do verifyFuncCall exp qf vs
                      ftype <- getFuncType qf (length vs)
                      return [(ve, [(ftype, vs)])]
       FuncPartCall n -> -- note: also partial calls are considered as constr.
@@ -674,7 +841,7 @@ verifyVarExpr ve exp = case exp of
                      unless (isTotalACallType ctype) $ do
                        printIfVerb 2 $ "UNSATISFIED CALL TYPE: " ++
                          "partial application of non-total function\n"
-                       addFailedFunc exp Nothing
+                       addFailedFunc exp Nothing fcTrue
                      -- note: also partial calls are considered as constructors
                      returnConsIOType qf vs ve
       _        -> returnConsIOType qf vs ve
@@ -711,43 +878,74 @@ verifyVarExpr ve exp = case exp of
     --return [(rv, IOT [(anys, aCons qc anys)], vs)]
     return [(rv, [(IOT [(vstypes, aCons qc vstypes)], vs)])]
 
--- Verify the nonfailing type of a function
-verifyFuncCall :: TermDomain a => Bool -> Expr -> QName -> [Int] -> VerifyStateM a ()
-verifyFuncCall errorfail exp qf vs
-  | qf == pre "failed" || (errorfail && qf == pre "error")
-  = addFailedFunc exp Nothing
-  | otherwise = do
-    atype <- getCallType qf (length vs)
-    if isTotalACallType atype
-      then return ()
-      else do
-        incrNonTrivialCall
-        currfn <- getCurrentFuncName
-        printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
-                        snd qf ++ showArgumentVars vs ++
-                        " w.r.t. call type: " ++ prettyFunCallAType atype
-        showVarExpTypes
-        allvts <- getVarTypes
-        printIfVerb 3 $ "Current variable types:\n" ++ showVarTypes allvts
-        let svts = simplifyVarTypes allvts
-        printIfVerb 3 $ "Simplified variable types:\n" ++ showVarTypes svts
-        let vts = map (\v -> (v, getVarType v svts)) vs
-        printIfVerb 2 $ "Variable types in this call: " ++ printVATypes vts
-        if subtypeOfRequiredCallType (map snd vts) atype
-          then printIfVerb 2 "CALL TYPE SATISFIED\n"
-          else -- Check whether types of call argument variables can be made
-               -- more specific to satisfy the call type. If all these variables
-               -- are parameters of the current functions, specialize the
-               -- call type of this function and analyze it again.
-               do printIfVerb 2 "UNSATISFIED CALL TYPE\n"
-                  maybe
-                    (addFailedFunc exp Nothing)
-                    (\newvts -> do
-                       printIfVerb 2 $ "COULD BE SATISFIED BY ENSURING:\n" ++
-                                       printVATypes newvts
-                       addFailedFunc exp (Just newvts)
-                    )
-                    (specializeToRequiredType vts atype)
+-- Verify the abstract type or non-fail condition of a function call.
+-- The second argument is the function call as a FlatCurry expression,
+-- the third argument is the function name, and the fourth argument
+-- are the argument variables.
+verifyFuncCall :: TermDomain a => Expr -> QName -> [Int] -> VerifyStateM a ()
+verifyFuncCall exp qf vs = do
+  opts <- fmap vstToolOpts get
+  if qf == pre "failed" || (optError opts && qf == pre "error")
+    then do unsat  <- if optSMT opts
+                        then do vtypes <- getCurrentArgTypes
+                                bcond  <- getExpandedCondition
+                                isUnsatisfiable vtypes (fcAnds bcond)
+                        else return False
+            if unsat then printIfVerb 2 "FUNCTION CALL NOT REACHABLE\n"
+                     else addFailedFunc exp Nothing fcTrue
+    else do atype <- getCallType qf (length vs)
+            if isTotalACallType atype 
+              then return ()
+              else do nfcond <- getCallConditionOf qf
+                      verifyNonTrivFuncCall exp qf vs atype nfcond
+
+-- Verify the non-trivial abstract type or non-fail condition
+--  of a function call.
+verifyNonTrivFuncCall :: TermDomain a => Expr -> QName -> [Int]
+                      -> ACallType a -> [Expr] -> VerifyStateM a ()
+verifyNonTrivFuncCall exp qf vs atype nfcond = do
+  incrNonTrivialCall
+  currfn <- getCurrentFuncName
+  printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
+                  snd qf ++ showArgumentVars vs ++
+                  " w.r.t. call type: " ++ prettyFunCallAType atype
+  st <- get
+  -- compute the precondition for this call by renaming the arguments:
+  let callcond = map (expandExpr (vstVarExp st))
+                     (map (expandExpr (zip [1 .. length vs] (map Var vs)))
+                          nfcond)
+  unless (null callcond) $ printIfVerb 2 $
+    "and call condition: " ++ showSimpExp (fcAnds callcond)
+  showVarExpTypes
+  allvts <- getVarTypes
+  printIfVerb 3 $ "Current variable types:\n" ++ showVarTypes allvts
+  let svts = simplifyVarTypes allvts
+  printIfVerb 3 $ "Simplified variable types:\n" ++ showVarTypes svts
+  let vts = map (\v -> (v, getVarType v svts)) vs
+  printIfVerb 2 $ "Variable types in this call: " ++ printVATypes vts
+  if subtypeOfRequiredCallType (map snd vts) atype
+    then printIfVerb 2 "CALL TYPE SATISFIED\n"
+    else -- Check whether types of call argument variables can be made
+         -- more specific to satisfy the call type. If all these variables
+         -- are parameters of the current functions, specialize the
+         -- call type of this function and analyze it again.
+         do printIfVerb 2 "UNSATISFIED CALL TYPE\n"
+            maybe
+              (do implied <- if optSMT (vstToolOpts st)
+                               then do vtypes <- getCurrentArgTypes
+                                       bcond  <- getExpandedCondition
+                                       isImpliedBy vtypes (fcAnds bcond)
+                                                   (fcAnds callcond)
+                               else return False
+                  if implied
+                    then printIfVerb 2 "CALL CONDITION SATISFIED\n"
+                    else addFailedFunc exp Nothing (fcAnds callcond))
+              (\newvts -> do
+                 printIfVerb 2 $ "COULD BE SATISFIED BY ENSURING:\n" ++
+                                 printVATypes newvts
+                 addFailedFunc exp (Just newvts) fcTrue
+              )
+              (specializeToRequiredType vts atype)
  where
   printVATypes = intercalate ", " . map (\ (v,t) -> show v ++ '/' : showType t)
 
@@ -761,10 +959,17 @@ verifyFuncCall errorfail exp qf vs
 checkDivOpNonZero :: TermDomain a => Expr -> VerifyStateM a (VarTypesMap a)
                   -> VerifyStateM a (VarTypesMap a)
 checkDivOpNonZero exp cont = case exp of
-  Comb FuncCall ap1 [ Comb FuncCall ap2 [Comb FuncCall dm _, arg1], nexp]
-      | ap1 == apply && ap2 == apply && dm `elem` divops && isNonZero nexp
-    -> do verifyExpr True arg1
-          return []
+  Comb FuncCall ap1 [ Comb FuncCall ap2 [Comb FuncCall qf _, arg1], arg2]
+    | ap1 == apply && ap2 == apply && qf `elem` divops
+    -> if isNonZero arg2
+         then do verifyExpr True arg1
+                 return []
+         else do v1 <- verifyExpr True arg1
+                 v2 <- verifyExpr True arg2
+                 let nfcond = [Comb FuncCall ("Prelude","/=")
+                                    [Var v2, Lit (Intc 0)]]
+                 verifyNonTrivFuncCall exp qf [v1,v2] failACallType nfcond
+                 cont
   _ -> cont
  where
   isNonZero e = case e of
@@ -823,19 +1028,27 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
 verifyBranch :: TermDomain a => Int -> Int -> BranchExpr -> VerifyStateM a (VarTypesMap a)
 verifyBranch casevar ve (Branch (LPattern l)    e) = do
   vts <- getVarTypes
+  cond <- getCondition
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
+  addEquVarCondition casevar (Lit l)
   if isEmptyType (getVarType casevar branchvartypes)
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
             iots <- verifyVarExpr ve e
             setVarTypes vts
+            setCondition cond
             return iots
 verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   addVarExps (map (\v -> (v, Var v)) vs)
-  vts <- getVarTypes
+  vts  <- getVarTypes
+  cond <- getCondition
   let pattype        = aCons qc (anyTypes (length vs))
       branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar pattype vts)
       casevartype    = getVarType casevar branchvartypes
+  -- only add equality to constants as conditions:
+  when (null vs) $ addEquVarCondition casevar (Comb ConsCall qc [])
+  printIfVerb 3 $ "BRANCH " ++ snd qc
+  showVarExpTypes
   if isEmptyType casevartype
     then return [] -- unreachable branch
     else do setVarTypes branchvartypes
@@ -844,6 +1057,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
             --mapM_ addVarAnyType vs
             iots <- verifyVarExpr ve e
             setVarTypes vts
+            setCondition cond
             return iots
 
 -- Gets the abstract type of a variable w.r.t. a set of variable types.
@@ -894,5 +1108,68 @@ enforceNormalForm x
                                   (id $!! x) `seq` return ()
                                   putStrLn "DONE"
   | otherwise                = return ()
+
+------------------------------------------------------------------------------
+-- Replace all variables in a FlatCurry expression by their bindings
+-- passed as mapping from variables to expressions.
+expandExpr :: [(Int,Expr)] -> Expr -> Expr
+expandExpr bs = expE
+ where
+  expE exp = case exp of
+    Var v         -> maybe (Var v)
+                           (\e -> if e == Var v then e else expE e)
+                           (lookup v bs)
+    Lit _         -> exp
+    Comb ct qf es -> Comb ct qf (map expE es)
+    Or e1 e2      -> Or (expE e1) (expE e2)
+    Free vs e     -> Free vs (expE e)
+    Let vbs e     -> Let (map (\(v,ve) -> (v, expE ve)) vbs) (expE e)
+    Case ct e brs -> Case ct (expE e)
+                          (map (\(Branch p pe) -> Branch p (expE pe)) brs)
+    Typed e t     -> Typed (expE e) t
+
+-- Shows the simplified expression.
+showSimpExp :: Expr -> String
+showSimpExp = showExp . simpExpr
+
+--- Checks the unsatisfiability of a Boolean expression w.r.t. a set
+--- of variables (second argument) with an SMT solver.
+isUnsatisfiable :: TermDomain a => [(Int,TypeExpr)] -> Expr -> VerifyStateM a Bool
+isUnsatisfiable vts bexp = do
+  st <- get
+  let vtypes   = filter ((`elem` allVars bexp) . fst) vts
+      question =  "IS '" ++ showSimpExp bexp ++ "' UNSATISFIABLE? "
+  fname <- getCurrentFuncName
+  answer <- lift $ checkImplicationWithSMT (vstToolOpts st) fname question
+                                           (vstFuncDecls st) vtypes bexp fcFalse
+  return (maybe False id answer)
+
+--- Checks whether one Boolean expression implies another one w.r.t. a set
+--- of variables (second argument) with an SMT solver.
+isImpliedBy :: TermDomain a => [(Int,TypeExpr)] -> Expr -> Expr -> VerifyStateM a Bool
+isImpliedBy vts precond imp = do
+  st <- get
+  let vtypes   = filter ((`elem` (allVars precond ++ allVars imp)) . fst) vts
+      question =  "DOES " ++ showSimpExp precond ++ " IMPLY " ++ showSimpExp imp
+  fname <- getCurrentFuncName
+  answer <- lift $ checkImplicationWithSMT (vstToolOpts st) fname question
+                                           (vstFuncDecls st) vtypes precond imp
+  return (maybe False id answer)
+
+------------------------------------------------------------------------------
+
+nonFailCondsOfModule :: String -> [(QName,[Expr])]
+nonFailCondsOfModule mn | mn == "Prelude" = [] --preludeNonFailConds
+                        | otherwise       = []
+
+preludeNonFailConds :: [(QName,[Expr])]
+preludeNonFailConds = map (\dop -> (pre dop, [arg2NonZero])) divops
+ where
+  arg2NonZero = Comb FuncCall ("Prelude","/=") [Var 2, Lit (Intc 0)]
+  divops = [ "_impl#div#Prelude.Integral#Prelude.Int"
+           , "_impl#mod#Prelude.Integral#Prelude.Int"
+           , "_impl#quot#Prelude.Integral#Prelude.Int"
+           , "_impl#rem#Prelude.Integral#Prelude.Int"
+           , "div", "mod", "quot", "rem" ]
 
 ------------------------------------------------------------------------------

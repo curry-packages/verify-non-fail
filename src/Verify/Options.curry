@@ -3,7 +3,7 @@
 --- related operations.
 ---
 --- @author Michael Hanus
---- @version November 2023
+--- @version December 2023
 -------------------------------------------------------------------------
 
 module Verify.Options
@@ -28,7 +28,8 @@ import System.IO             ( hFlush, stdout )
 import System.Process        ( exitWith )
 
 data Options = Options
-  { optVerb        :: Int  -- verbosity (0: quiet, 1: status, 2: interm, 3: all)
+  { optVerb        :: Int  -- verbosity (0: quiet, 1: status, 2: intermediate,
+                           --            3: verify details, 4: all)
   , optHelp        :: Bool -- if help info should be printed
   , optFunction    :: String -- show the result for this function
   , optImports     :: Bool -- read/analyze imports/prelude? (only for testing)
@@ -38,6 +39,8 @@ data Options = Options
   , optCallTypes   :: Bool -- show call types
   , optIOTypes     :: Bool -- show input/output types
   , optVerify      :: Bool -- verify call types
+  , optSMT         :: Bool -- use SMT solver (Z3) to verify non-fail conditions?
+  , optStoreSMT    :: Bool -- store generated SMT scripts (for debugging)
   , optError       :: Bool -- consider Prelude.error as failing operation?
   , optModule      :: Bool -- generate a `..._CALLTYPES` module?
   , optStats       :: Bool -- show and store statitics?
@@ -48,7 +51,7 @@ data Options = Options
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
-  Options 1 False "" True False False True False False True False
+  Options 1 False "" True False False True False False True True False False
           False False False ""
 
 --- Process the actual command line argument and return the options
@@ -108,6 +111,9 @@ options =
   , Option "" ["noimports"]
            (NoArg (\opts -> opts { optImports = False }))
            "do not read/analyze imported modules (for testing)"
+  , Option "" ["nosmt"]
+           (NoArg (\opts -> opts { optSMT = False }))
+           "do not use SMT solver (Z3) to verify non-fail\nconditions"
   , Option "n" ["noverify"]
            (NoArg (\opts -> opts { optVerify = False }))
            "do not verify call types in function calls"
@@ -117,6 +123,9 @@ options =
   , Option "s" ["statistics"]
            (NoArg (\opts -> opts { optStats = True }))
            "show/store statistics (functions, failures,...)"
+  , Option "" ["storesmt"]
+           (NoArg (\opts -> opts { optStoreSMT = True }))
+           "store generated SMT scripts (for debugging)"
   , Option "t" ["time"]
            (NoArg (\opts -> opts { optTime = True }))
            "show total verification time for each module"

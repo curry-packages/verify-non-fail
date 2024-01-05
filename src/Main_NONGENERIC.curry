@@ -100,14 +100,14 @@ verifyModule valueanalysis astore opts mname = do
       numvisfuncs  = length visfuncs
       visfuncset   = Set.fromList visfuncs
       isVisible qf = Set.member qf visfuncset
-  imps@(impconss,impacalltypes,impiotypes) <-
+  imps@(impconss,impacalltypes,_,impiotypes) <-
     if optImports opts
       then do
         whenStatus opts $ putStr $
           "Reading abstract types of imports: " ++ unwords (progImports flatprog)
         readTypesOfModules opts (verifyModule valueanalysis astore)
                            (progImports flatprog)
-      else return ([],[],[])
+      else return ([],[],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
                   else printWhenStatus opts ""
@@ -154,7 +154,7 @@ verifyModule valueanalysis astore opts mname = do
                             finalntacalltypes (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
-    storeTypes opts mname modcons finalacalltypes iotypes
+    storeTypes opts mname modcons finalacalltypes [] iotypes
     storeStatistics opts mname stattxt statcsv
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
 

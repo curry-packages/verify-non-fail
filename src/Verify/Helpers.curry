@@ -126,6 +126,15 @@ funcsInExpr e =
   cas _ exp bs = exp . foldr (.) id bs
   branch _ exp = exp
 
+--- Transforms a list of argument variable (indices) and a function type
+--- expression into a list of corresponding typed variables.
+funcType2TypedVars :: [Int] -> TypeExpr -> [(Int,TypeExpr)]
+funcType2TypedVars []     _     = []
+funcType2TypedVars (v:vs) ftype = case ftype of
+    FuncType t1 t2 -> (v,t1) : funcType2TypedVars vs t2
+    ForallType _ t -> funcType2TypedVars (v:vs) t
+    _              -> error "Illegal function type in funcType2TypedVars"
+
 ------------------------------------------------------------------------------
 --- A position in a term is represented as list of integers.
 type Pos = [Int]

@@ -209,6 +209,10 @@ defaultCallTypes =
       , "mod", "modInt", "prim_modInt"
       , "quot", "quotInt", "prim_quotInt"
       , "rem", "remInt", "prim_remInt"
+      , "_impl#div#Prelude.Integral#Prelude.Int"
+      , "_impl#mod#Prelude.Integral#Prelude.Int"
+      , "_impl#quot#Prelude.Integral#Prelude.Int"
+      , "_impl#rem#Prelude.Integral#Prelude.Int"
       , "sqrtFloat", "prim_sqrtFloat"
       ] ++
   [ (pre "&",   [[MCons [(pre "True",[])], MCons [(pre "True",[])]]])
