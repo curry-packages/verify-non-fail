@@ -12,6 +12,7 @@ import Analysis.ProgInfo
 import Analysis.Types
 import CASS.Server        ( analyzeGeneric, analyzePublic )
 import Data.Time          ( ClockTime )
+import FlatCurry.Files    ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Types
 import System.CurryPath   ( lookupModuleSourceInLoadPath )
@@ -68,6 +69,11 @@ getModuleModTime mname =
         (\ (_,fn) -> getModificationTime fn)
 
 ------------------------------------------------------------------------------
+--- Read and transform a module in FlatCurry format.
+readTransFlatCurry :: String -> IO Prog
+readTransFlatCurry mname =
+  readFlatCurry mname >>= return . transformChoiceInProg . removeTopForallType
+
 --- Replace all occurrences of `Prelude.?` in a FlatCurry program by
 --- `Or` expressions.
 transformChoiceInProg :: Prog -> Prog
@@ -84,6 +90,16 @@ transformChoiceInProg = updProg id id id (map transChoiceInFunc) id
         then Or (es!!0) (es!!1)
         else Comb ct qf es
 
+--- Remove the top-level `ForallType` constructors from all function signatures.
+removeTopForallType :: Prog -> Prog
+removeTopForallType = updProg id id id (map rmForallTypeInFunc) id
+ where
+  rmForallTypeInFunc = updFunc id id id rmForallType id
+
+  rmForallType texp = case texp of ForallType _ te -> te
+                                   _               -> texp
+
+--- Return the pattern variables of a pattern.
 patternArgs :: Pattern -> [Int]
 patternArgs (Pattern _ vs) = vs
 patternArgs (LPattern _)   = []
@@ -110,6 +126,10 @@ readQC = readMQC []
                                   else (toMod (ms ++ [s1]), c:cs)
 
   toMod = intercalate "."
+
+--- The "unknown" type (hopefully not really used at the end).
+unknownType :: TypeExpr
+unknownType = TCons (pre "UNKNOWN") []
 
 ------------------------------------------------------------------------------
 --- Returns the qualified names of all functions occurring in an expression.
@@ -207,5 +227,15 @@ isSetFunOp (mn,fn) =
   (mn == "Control.Search.SetFunctions" || mn == "Control.SetFunctions") &&
   take 3 fn == "set" &&
   all isDigit (drop 3 fn)
+
+------------------------------------------------------------------------------
+fst3 :: (a,b,c) -> a
+fst3 (x,_,_) = x
+
+snd3 :: (a,b,c) -> b
+snd3 (_,y,_) = y
+
+trd3 :: (a,b,c) -> c
+trd3 (_,_,z) = z
 
 ------------------------------------------------------------------------------

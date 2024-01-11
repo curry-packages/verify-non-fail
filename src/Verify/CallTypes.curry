@@ -279,7 +279,7 @@ callTypeExpr ctst exp = case exp of
   addBranchPattern (LPattern _)   = ctst
 
 ------------------------------------------------------------------------------
--- An abstract call type of an operation (paraeterized over the abstract
+-- An abstract call type of an operation (parameterized over the abstract
 -- domain) is either `Nothing` in case of an always failing operation,
 -- or just a list of abstract types for the arguments.
 -- In the following we provide some operations on abstract call types.

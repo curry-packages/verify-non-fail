@@ -32,17 +32,25 @@ fcNot e = case e of
 fcOr :: Expr -> Expr -> Expr
 fcOr e1 e2 | e1 == fcFalse = e2
            | e2 == fcFalse = e1
+           | e1 == fcTrue  = fcTrue
+           | e2 == fcTrue  = fcTrue
            | otherwise     = Comb FuncCall (pre "||") [e1,e2]
 
 -- Conjunction of two expressions.
 fcAnd :: Expr -> Expr -> Expr
-fcAnd e1 e2 | e1 == fcTrue = e2
-            | e2 == fcTrue = e1
-            | otherwise    = Comb FuncCall (pre "&&") [e1,e2]
+fcAnd e1 e2 | e1 == fcTrue  = e2
+            | e2 == fcTrue  = e1
+            | e1 == fcFalse = fcFalse
+            | e2 == fcFalse = fcFalse
+            | otherwise     = Comb FuncCall (pre "&&") [e1,e2]
 
 -- Conjunction of a list of expressions.
 fcAnds :: [Expr] -> Expr
 fcAnds = foldr fcAnd fcTrue
+
+-- Equality between two expressions.
+fcEqu :: Expr -> Expr -> Expr
+fcEqu e1 e2 = Comb FuncCall (pre "==") [e1,e2]
 
 ----------------------------------------------------------------------------
 

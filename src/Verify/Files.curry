@@ -12,7 +12,8 @@
 
 module Verify.Files
    ( deleteVerifyCacheDirectory
-   , readTypesOfModules, readPublicCallTypeModule, readCallTypeFile
+   , readTypesOfModules, readPublicCallTypeModule
+   , readCallTypeFile, readNonFailCondFile
    , storeTypes
    )
   where
@@ -252,6 +253,26 @@ readCallTypeFile opts mtimesrc mname = do
           return $ Just (map (\ (fn,ct) -> ((mname,fn), ct)) cts)
         else return Nothing
     else return Nothing
+
+--- Reads the possibly previously inferred non-fail conditions for a
+--- given module if it is up-to-date (where the modification time
+--- of the module is passed as the second argument).
+readNonFailCondFile :: Options -> ClockTime -> String -> IO [(QName,[Expr])]
+readNonFailCondFile opts mtimesrc mname = do
+  fname <- getNonFailCondFile opts mname
+  existsf <- doesFileExist fname
+  if existsf && not (optRerun opts)
+    then do
+      mtimectf <- getModificationTime fname
+      if compareClockTime mtimectf mtimesrc == GT
+        then do
+          printWhenStatus opts $
+            "Reading previously inferred non-fail conditions from '" ++
+            fname ++ "'..."
+          cts <- readFile fname >>= return . map read . lines
+          return $ map (\ (fn,ct) -> ((mname,fn), ct)) cts
+        else return []
+    else return []
 
 ------------------------------------------------------------------------------
 --- Reads the public non-trivial call types (which have been already

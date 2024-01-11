@@ -2,7 +2,7 @@
 --- Auxiliaries for printing FlatCurry entities.
 ---
 --- @author Michael Hanus
---- @version December 2023
+--- @version January 2024
 ------------------------------------------------------------------------------
 
 module FlatCurry.Print
@@ -11,6 +11,14 @@ module FlatCurry.Print
 import FlatCurry.Pretty as FCP
 import FlatCurry.Types
 import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
+
+--- Shows a pretty-printed FlatCurry expression.
+showTypeExp :: TypeExpr -> String
+showTypeExp = pPrint . ppTypeExp
+
+--- Pretty prints a FlatCurry expression.
+ppTypeExp :: TypeExpr -> Doc
+ppTypeExp = FCP.ppTypeExp defaultOptions { qualMode = QualNone}
 
 --- Shows a pretty-printed variable binding to a FlatCurry expression.
 showBindExp :: Int -> Expr -> String

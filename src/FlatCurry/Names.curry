@@ -33,8 +33,8 @@ unaryPrimOps =
 binaryPrimOps :: [(String,String)]
 binaryPrimOps =
   [("constrEq","==")
-  ,("_impl#==#Prelude.Eq#Prelude.Int","=")
-  ,("_impl#==#Prelude.Eq#Prelude.Char","=")
+  ,("_impl#==#Prelude.Eq#Prelude.Int","==")
+  ,("_impl#==#Prelude.Eq#Prelude.Char","==")
   ,("/=","/=")  -- will be translated as negated '='
   ,("_impl#/=#Prelude.Eq#Prelude.Int","/=")
   ,("_impl#/=#Prelude.Eq#Prelude.Char","/=")

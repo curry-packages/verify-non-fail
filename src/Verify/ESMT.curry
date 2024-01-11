@@ -7,7 +7,7 @@
 --- SMT-LIB language specified in the package `smtlib`.
 ---
 --- @author  Michael Hanus
---- @version December 2023
+--- @version January 2024
 ------------------------------------------------------------------------------
 
 module Verify.ESMT where
@@ -22,7 +22,7 @@ import Text.Pretty
 data SMTLib = SMTLib [Command]
   deriving (Eq, Show)
 
-type SVar  = Int  -- variables 
+type SVar  = Int    -- variables 
 type Ident = String -- identifiers (e.g., functions)
 
 
@@ -38,6 +38,14 @@ showSort (SComb s ss) = s ++ intercalate "_" (map showSort ss)
 --- Does the sort represent a type parameter (`TVar i`)?
 isTypeParameter :: Sort -> Bool
 isTypeParameter (SComb s ss) = null ss && "TVar" `isPrefixOf` s && length s > 4
+
+--- A sort represent an anonymous type (`SComb "_" []`).
+anonymousType :: Sort
+anonymousType = SComb "_" []
+
+--- Does the sort represent an anonymous type (`SComb "_" []`)?
+isAnonymousType :: Sort -> Bool
+isAnonymousType (SComb s ss) = null ss && s == "_"
 
 ----------------------------------------------------------------------------
 --- Terms
@@ -62,8 +70,8 @@ qidName (As n _) = n
 data SortedVar = SV SVar Sort
  deriving (Eq, Show)
 
---data Pattern = PComb SVar [SVar]
---  deriving (Eq, Show)
+data Pattern = PComb QIdent [SVar]
+ deriving (Eq, Show)
 
 --- Terms occurring in formulas
 data Term = TConst TLiteral
@@ -72,11 +80,19 @@ data Term = TConst TLiteral
           | Let    [(SVar, Term)] Term
           | Forall [SortedVar] Term
           | Exists [SortedVar] Term
-          --| Match  Term [(Pattern, Term)]
+          | Match  Term [(Pattern, Term)]
           --| Annot  Term [Attribute]
  deriving (Eq, Show)
 
 -- Smart constructors:
+
+-- `True` pattern:
+pTrue :: Pattern
+pTrue = PComb (Id "true") []
+
+-- `False` pattern:
+pFalse :: Pattern
+pFalse = PComb (Id "false") []
 
 --- Combined term with string identifier.
 tComb :: Ident -> [Term] -> Term
@@ -109,6 +125,14 @@ tEqu t1 t2 = tComb "=" [t1, t2]
 --- Equality between a variable and a term.
 tEquVar :: SVar -> Term -> Term
 tEquVar v t = tEqu (TSVar v) t
+
+--- if-then-else expression
+tITE :: Term -> Term -> Term -> Term
+tITE b t f = tComb "ite" [b,t,f]
+
+--- Let expression.
+tLet :: [(SVar, Term)] -> Term -> Term
+tLet = Let
 
 --- A constant with a sort declaration.
 sortedConst :: Ident -> Sort -> Term
@@ -202,6 +226,8 @@ allQIdsOfTerm (Forall _ arg) = allQIdsOfTerm arg
 allQIdsOfTerm (Exists _ arg) = allQIdsOfTerm arg
 allQIdsOfTerm (Let bs e)     =
   foldr union [] (map allQIdsOfTerm (e : map snd bs))
+allQIdsOfTerm (Match  e ps)     =
+  foldr union [] (map allQIdsOfTerm (e : map snd ps))
 
 -- All possibly sorted identifiers occurring in a define-sig element.
 allQIdsOfSigs :: [FunSigTerm] -> [QIdent]
@@ -235,6 +261,8 @@ typeParamsOfTerm (Exists svs arg) =
   foldr union (typeParamsOfTerm arg) (map typeParamsOfSV svs)
 typeParamsOfTerm (Let bs e)     =
   foldr union [] (map typeParamsOfTerm (e : map snd bs))
+typeParamsOfTerm (Match e ps)     =
+  foldr union [] (map typeParamsOfTerm (e : map snd ps))
 
 typeParamsOfQId :: QIdent -> [Ident]
 typeParamsOfQId (Id _  ) = []
@@ -247,19 +275,30 @@ typeParamsOfFunSig :: FunSig -> [Ident]
 typeParamsOfFunSig (FunSig _ ss s) =
   foldr union [] (map typeParamsOfSort (ss++[s]))
 
---- A type paramter substitution.
+--- A type parameter substitution.
 type TPSubst = FM.Map Ident Sort
 
 --- The empty substitution
 emptyTPSubst :: TPSubst
 emptyTPSubst = FM.empty
 
+--- Shows a type substitution.
+showTPSubst :: TPSubst -> String
+showTPSubst ts =
+  "{ " ++
+  intercalate ", " (map (\(i,s) -> show i ++ " |-> " ++ show s) (FM.toList ts))
+  ++ " }"
+
+--- Create a type substitution from ident/sort pairs.
+makeTPSubst :: [(Ident,Sort)] -> TPSubst
+makeTPSubst = FM.fromList
+
 ----------------------------------------------------------------------------
 --- Compute sort matching, i.e., if `matchSort t1 t2 = s`, then `t2 = s(t1)`.
 matchSort :: Sort -> Sort -> Maybe TPSubst
 matchSort s1@(SComb sn1 ss1) s2@(SComb sn2 ss2)
  | isTypeParameter s1
- = Just $ if s1 == s2
+ = Just $ if s1 == s2 || isAnonymousType s2
             then emptyTPSubst
             else FM.insert (head (typeParamsOfSort s1)) s2 emptyTPSubst
  | otherwise
@@ -288,6 +327,7 @@ substTerm sub term = case term of
   Forall svs arg -> Forall (map (substSV sub) svs) (substTerm sub arg)
   Exists svs arg -> Forall (map (substSV sub) svs) (substTerm sub arg)
   Let bs e -> Let (map (\ (v,s) -> (v, substTerm sub s)) bs) (substTerm sub e)
+  Match e ps -> Match (substTerm sub e) (map (\(v,s) -> (v, substTerm sub s)) ps)
 
 substQId :: TPSubst -> QIdent -> QIdent
 substQId _ qid@(Id _) = qid
@@ -315,6 +355,7 @@ rnmTerm rnm term = case term of
   Forall svs arg -> Forall svs (rnmTerm rnm arg)
   Exists svs arg -> Forall svs (rnmTerm rnm arg)
   Let bs e -> Let (map (\ (v,s) -> (v, rnmTerm rnm s)) bs) (rnmTerm rnm e)
+  Match e ps -> Match (rnmTerm rnm e) (map (\ (v,s) -> (v, rnmTerm rnm s)) ps)
 
 rnmQId :: (Ident -> Ident) -> QIdent -> QIdent
 rnmQId rnm (Id n)   = Id (rnm n)
@@ -336,6 +377,9 @@ simpTerm (Let bs t) = if null bs then t'
                                  else Let bs' t'
  where bs' = map (\ (v,tm) -> (v, simpTerm tm)) bs
        t'  = simpTerm t
+simpTerm (Match t ps) = Match t' ps'
+ where t'  = simpTerm t
+       ps' = map (\ (v,tm) -> (v, simpTerm tm)) ps
 simpTerm (Forall vs t) = if null vs then t' else Forall vs t'
  where t' = simpTerm t
 simpTerm (Exists vs t) = if null vs then t' else Exists vs t'
@@ -370,18 +414,30 @@ simpTerm (TComb f ts)
                              _                     -> [arg]
 
 --------------------------------------------------------------------------
--- Remove As-identifiers if they are functions (for better readability):
+--- Remove As-identifiers if they are functions (for better readability):
 reduceAsInTerm :: Term -> Term
 reduceAsInTerm (TConst l) = TConst l
 reduceAsInTerm (TSVar  v) = TSVar v
 reduceAsInTerm (Let bs t) = Let (map (\ (v,tm) -> (v, reduceAsInTerm tm)) bs)
                                 (reduceAsInTerm t)
+reduceAsInTerm (Match t ps)  = Match (reduceAsInTerm t)
+                                 (map (\ (v,tm) -> (v, reduceAsInTerm tm)) ps)
 reduceAsInTerm (Forall vs t) = Forall vs (reduceAsInTerm t)
 reduceAsInTerm (Exists vs t) = Exists vs (reduceAsInTerm t)
-reduceAsInTerm (TComb f ts) = TComb (simpAs f) (map reduceAsInTerm ts)
+reduceAsInTerm (TComb f ts)  = TComb (simpAs f) (map reduceAsInTerm ts)
  where
   simpAs qid = case qid of As n (SComb s _) | s == "Func" -> Id n
                            _ -> qid
+
+--- Remove As-identifiers if they are functions (for better readability):
+reduceAsInCmd :: Command -> Command
+reduceAsInCmd cmd = case cmd of
+  Assert t         -> Assert (reduceAsInTerm t)
+  DefineFunsRec fs -> DefineFunsRec
+                        (map (\(fd,t) -> (fd, reduceAsInTerm t)) fs)
+  DefineSigsRec fs -> DefineSigsRec
+                        (map (\(is,fd,t) -> (is, fd, reduceAsInTerm t)) fs)
+  _                -> cmd
 
 --------------------------------------------------------------------------
 -- Get all sort identifiers occurring in a sort.
@@ -390,12 +446,13 @@ sortIdsOfSort (SComb s ss) = s : concatMap sortIdsOfSort ss
 
 -- Get all sorts occurring in a term.
 sortsOfTerm :: Term -> [Sort]
-sortsOfTerm (TConst _) = []
-sortsOfTerm (TSVar  _) = []
-sortsOfTerm (Let bs t) = concatMap (sortsOfTerm . snd) bs ++ sortsOfTerm t
+sortsOfTerm (TConst _)    = []
+sortsOfTerm (TSVar  _)    = []
+sortsOfTerm (Let bs t)    = concatMap (sortsOfTerm . snd) bs ++ sortsOfTerm t
+sortsOfTerm (Match t ps)  = sortsOfTerm t ++ concatMap (sortsOfTerm . snd) ps
 sortsOfTerm (Forall vs t) = map sortOfSortedVar vs ++ sortsOfTerm t
 sortsOfTerm (Exists vs t) = map sortOfSortedVar vs ++ sortsOfTerm t
-sortsOfTerm (TComb f ts) = sortsOfQIdent f ++ concatMap sortsOfTerm ts
+sortsOfTerm (TComb f ts)  = sortsOfQIdent f ++ concatMap sortsOfTerm ts
  where
   sortsOfQIdent (Id _)   = []
   sortsOfQIdent (As _ s) = [s]
@@ -516,6 +573,9 @@ rnmQIdWithTInstTerm sigs term = case term of
   Exists svs arg -> Forall svs (rnmQIdWithTInstTerm sigs arg)
   Let bs e -> Let (map (\ (v,s) -> (v, rnmQIdWithTInstTerm sigs s)) bs)
                   (rnmQIdWithTInstTerm sigs e)
+  Match e ps -> Match (rnmQIdWithTInstTerm sigs e)
+                      (map (\ (v,s) -> (v, rnmQIdWithTInstTerm sigs s)) ps)
+                  
 
 -- Renaming operation which changes the name of a given (polymorphic)
 -- function w.r.t. a list of type parameters and a substitution.
@@ -553,7 +613,8 @@ sigTypeAsSort (t:ts) s = SComb "Func" [t, sigTypeAsSort ts s]
 --- Show an SMT-LIB script with a newline after transforming polymorphic
 --- functions into type-instanteded functions.
 showSMT :: [Command] -> String
-showSMT cmds = pPrint (pretty (SMTLib (unpoly cmds))) ++ "\n"
+showSMT cmds =
+  pPrint (pretty (SMTLib (map reduceAsInCmd (unpoly cmds)))) ++ "\n"
 
 --- Show an SMT-LIB script with a newline.
 showSMTRaw :: [Command] -> String
@@ -578,6 +639,9 @@ instance Pretty QIdent where
 instance Pretty SortedVar where
   pretty (SV v s) = parent [prettyVar v, pretty s]
 
+instance Pretty Pattern where
+  pretty (PComb qi ts) = parensIf (not $ null ts) $
+                           pretty qi <+> (hsep (map (pretty . TSVar) ts))
 
 instance Pretty Term where
   pretty (TConst c) = pretty c
@@ -586,6 +650,11 @@ instance Pretty Term where
                            pretty qi <+> (hsep (map pretty ts))
   pretty (Let     bs t) = parent [text "let", parent (map ppBind bs), pretty t]
     where ppBind (v, t') = parent [prettyVar v, pretty t']
+  pretty (Match t ps) = case ps of
+    [(p1,t1), (p2,t2)] | p1 == pTrue && p2 == pFalse -> pretty (tITE t t1 t2)
+                       | p2 == pTrue && p1 == pFalse -> pretty (tITE t t2 t1)
+    _ -> parent [text "match", pretty t, parent (map ppMatch ps)]
+   where ppMatch (v, t') = parent [pretty v, pretty t']
   pretty (Forall svs t) = parent [ text "forall"
                                  , parent (map pretty svs)
                                  , pretty t
@@ -632,7 +701,7 @@ ppSigBody (_, FunSig fn _ _, term) = vsep $ map pretty
 --- Pretty printing of SMT-LIB commands.
 ppCmd :: Command -> [Doc]
 ppCmd cmd = case cmd of
-  Assert   t -> [text "assert", pretty (reduceAsInTerm t)] -- for nicer printing
+  Assert   t -> [text "assert", pretty t]
   CheckSat   -> [text "check-sat"]
   DeclareVar (SV v s)  -> [text "declare-const", prettyVar v, pretty s]
   DeclareDatatypes sds -> -- use old SMT syntax:
