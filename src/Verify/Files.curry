@@ -31,7 +31,6 @@ import AbstractCurry.Types hiding ( pre )
 import Analysis.TermDomain  ( TermDomain )
 import Contract.Names       ( decodeContractName, encodeContractName )
 import Data.Time            ( ClockTime, compareClockTime )
-import FlatCurry.Types      ( Expr )
 import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
                             , modNameToPath )
 import System.Directory
@@ -44,6 +43,7 @@ import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
 import Verify.Helpers
 import Verify.IOTypes
+import Verify.NonFailConditions
 import Verify.Options
 
 ------------------------------------------------------------------------------
@@ -125,7 +125,7 @@ storeTypes :: TermDomain a => Options
            -> String                 -- module name
            -> [[(QName,Int)]]        -- all constructors grouped by type
            -> [(QName,ACallType a)]  -- all inferred abstract call types
-           -> [(QName,[Expr])]       -- inferred non-fail conditions
+           -> [(QName,NonFailCond)]       -- inferred non-fail conditions
            -> [(QName,InOutType a)]  -- all input output types
            -> IO ()
 storeTypes opts mname allcons acalltypes funconds iotypes = do
@@ -159,7 +159,7 @@ storeTypes opts mname allcons acalltypes funconds iotypes = do
 -- module, `Nothing` is returned.
 tryReadTypes :: TermDomain a => Options -> String
   -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType a)],
-                 [(QName,[Expr])], [(QName,InOutType a)]))
+                 [(QName,NonFailCond)], [(QName,InOutType a)]))
 tryReadTypes opts mname = do
   csfile   <- getConsTypesFile   opts mname
   ctfile   <- getCallTypesFile   opts mname
@@ -188,7 +188,7 @@ tryReadTypes opts mname = do
 -- for a given module.
 readTypes :: TermDomain a => Options -> String
           -> IO ([[(QName,Int)]], [(QName,ACallType a)],
-                 [(QName,[Expr])], [(QName,InOutType a)])
+                 [(QName,NonFailCond)], [(QName,InOutType a)])
 readTypes opts mname = do
   csfile <- getConsTypesFile   opts mname
   ctfile <- getCallTypesFile   opts mname
@@ -211,7 +211,7 @@ readTypes opts mname = do
 readTypesOfModules :: TermDomain a => Options
   -> (Options -> String -> IO ()) -> [String]
   -> IO ([[(QName,Int)]], [(QName, ACallType a)],
-         [(QName,[Expr])], [(QName, InOutType a)])
+         [(QName,NonFailCond)], [(QName, InOutType a)])
 readTypesOfModules opts computetypes mnames = do
   (xs,ys,zs, ws) <- mapM tryRead mnames >>= return . unzip4
   return (concat xs, concat ys, concat zs, concat ws)
@@ -257,7 +257,8 @@ readCallTypeFile opts mtimesrc mname = do
 --- Reads the possibly previously inferred non-fail conditions for a
 --- given module if it is up-to-date (where the modification time
 --- of the module is passed as the second argument).
-readNonFailCondFile :: Options -> ClockTime -> String -> IO [(QName,[Expr])]
+readNonFailCondFile :: Options -> ClockTime -> String
+                    -> IO [(QName,NonFailCond)]
 readNonFailCondFile opts mtimesrc mname = do
   fname <- getNonFailCondFile opts mname
   existsf <- doesFileExist fname

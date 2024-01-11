@@ -45,6 +45,7 @@ import Verify.CallTypes
 import Verify.Files
 import Verify.Helpers
 import Verify.IOTypes
+import Verify.NonFailConditions
 import Verify.Options
 import Verify.Statistics
 import Verify.WithSMT
@@ -271,12 +272,12 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
   let (failconds,refineconds) =
          partition (\(qf,_) -> qf `elem` (map fst (vstFunConds st)))
                    (vstNewFunConds st)
-      newfailconds = filter (\(qf,_) -> (qf,[fcFalse]) `notElem` vstFunConds st)
+      newfailconds = filter (\(qf,_) -> (qf,nfcFalse) `notElem` vstFunConds st)
                             failconds
       -- Condition for next iteration: set already existing conditions to
       -- `False` to avoid infinite refinements
       nextfunconds = (unionBy (\x y -> fst x == fst y)
-                              (map (\(qf,_) -> (qf, [fcFalse])) newfailconds)
+                              (map (\(qf,_) -> (qf, nfcFalse)) newfailconds)
                               (vstFunConds st)) ++ refineconds
       newrefineconds = newfailconds ++ refineconds
   --fdecls <- currentFuncDecls st
@@ -290,7 +291,7 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
             -- remove always failing conditions (since the call types are
             -- always failing for such functions):
             let st'' = st' { vstFunConds =
-                               filter ((/= [fcFalse]) . snd) nextfunconds }
+                               filter ((/= nfcFalse) . snd) nextfunconds }
             return (numits + 1, st'')
     else do
       let -- functions with refined call types:
@@ -323,15 +324,17 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
 
 -- Prints a list of conditions for operations (if not empty).
 -- The first argument contains all function declarations of the current module.
-showConditions :: [FuncDecl] -> [(QName, [Expr])] -> String
+showConditions :: [FuncDecl] -> [(QName, NonFailCond)] -> String
 showConditions fdecls = unlines . map showCond
  where
-  showCond (qf,cnd) =
+  showCond (qf,(nfcvars,cnd)) =
     let fdecl = maybe (error $
                        "showCondition: function '" ++ snd qf ++ "'' not found!")
                       id
                       (find (\fd -> funcName fd == qf) fdecls)
-    in "\n" ++ showFuncDecl (genNonFailFunction fdecl cnd)
+    in concatMap ("\n-- " ++)
+         (map (\(v,t) -> 'v' : show v ++ " :: " ++ showTypeExp t) nfcvars) ++
+       "\n" ++ showFuncDecl (genNonFailFunction fdecl cnd)
 
 -- Generates the function representing the non-fail condition for a given
 -- function and non-fail condition.
@@ -424,19 +427,19 @@ data VerifyState a = VerifyState
   , vstFailedFuncs :: [(QName,Int,Expr)]   -- functions with illegal calls
   , vstPartialBranches :: [(QName,Int,Expr,[QName])] -- incomplete branches
   , vstNewFailed   :: [(QName,ACallType a)] -- new failed function call types
-  , vstImpFunConds :: Map.Map QName [Expr]  -- call conditions of imports
-  , vstFunConds    :: [(QName,[Expr])]      -- call conditions of functions
-  , vstNewFunConds :: [(QName,[Expr])]      -- functions with new call conds
+  , vstImpFunConds :: Map.Map QName NonFailCond -- call conditions of imports
+  , vstFunConds    :: [(QName,NonFailCond)] -- call conditions of functions
+  , vstNewFunConds :: [(QName,NonFailCond)] -- functions with new call conds
   , vstStats       :: (Int,Int) -- numbers: non-trivial calls / incomplete cases
   , vstToolOpts    :: Options
   }
 
 --- Initializes the verification state.
 initVerifyState :: TermDomain a => Prog -> [[(QName,Int)]]
-                -> Map.Map QName (ACallType a) -> Map.Map QName [Expr]
+                -> Map.Map QName (ACallType a) -> Map.Map QName NonFailCond
                 -> Map.Map QName (ACallType a)
                 -> Map.Map QName (InOutType a)
-                -> [(QName,[Expr])] -> Options
+                -> [(QName,NonFailCond)] -> Options
                 -> IO (VerifyState a)
 initVerifyState flatprog allcons impacalltypes impfconds acalltypes
                 iotypes nfconds opts = do
@@ -537,17 +540,19 @@ addConditionRestriction qf cond = do
     -- check the satisfiability of the new condition:
     unsat <- isUnsatisfiable newcond
     when unsat $ printIfVerb 2 $ "...is unsatisfiable"
-    setNewFunCondition qf (if unsat then [fcFalse] else [newcond])
+    vartypes <- fmap (map (\(v,t,_) -> (v,t))) getVarExps
+    setNewFunCondition qf (if unsat then nfcFalse
+                                    else genNonFailCond vartypes [newcond])
   addCallTypeRestriction qf failACallType
 
 --- Sets a new non-fail condition for a function.
 --- If the function has already a new non-fail condition, they will be combined.
-setNewFunCondition :: TermDomain a => QName -> [Expr] -> VerifyStateM a ()
+setNewFunCondition :: TermDomain a => QName -> NonFailCond -> VerifyStateM a ()
 setNewFunCondition qf newcond = do
   st <- get
   maybe (put $ st { vstNewFunConds = (qf,newcond) : (vstNewFunConds st) } )
         (\prevcond -> do
-          let newct = union prevcond newcond
+          let newct = combineNonFailConds prevcond newcond
           put $ st { vstNewFunConds = unionBy (\x y -> fst x == fst y)
                                         [(qf,newct)] (vstNewFunConds st) })
         (lookup qf (vstNewFunConds st))
@@ -603,7 +608,7 @@ addFailedFunc exp mbvts cond = do
         mbvts
  where
   noRefinementFor qf = do
-    printIfVerb 2 $ "CANNOT REFINE CALL TYPE OF FUNCTION " ++ snd qf
+    printIfVerb 2 $ "CANNOT REFINE ABSTRACT CALL TYPE OF FUNCTION " ++ snd qf
     addConditionRestriction qf cond
 
 -- Adds an info about cases with missing branches in the current function.
@@ -717,10 +722,10 @@ addEquVarCondition var exp = do
   addCondition conj
 
 -- Gets the call condition of a given operation.
-getCallConditionOf :: TermDomain a => QName -> VerifyStateM a [Expr]
+getCallConditionOf :: TermDomain a => QName -> VerifyStateM a NonFailCond
 getCallConditionOf qf = do
   st <- get
-  return $ maybe (maybe [] id (Map.lookup qf (vstImpFunConds st)))
+  return $ maybe (maybe ([],[]) id (Map.lookup qf (vstImpFunConds st)))
                  id
                  (lookup qf (vstFunConds st))
 
@@ -809,8 +814,14 @@ verifyFuncRule vs ftype exp = do
   setFreshVarIndex (maximum (0 : vs ++ allVars exp) + 1)
   setVarExps  (map (\(v,te) -> (v, te, Var v)) (funcType2TypedVars vs ftype))
   qf <- getCurrentFuncName
-  fcond <- getCallConditionOf qf
-  setCondition fcond
+  (nfcvars,fcond) <- getCallConditionOf qf
+  let freenfcargs = filter ((`notElem` vs) . fst) nfcvars
+  newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
+  -- add renamed free variables of condition to the current set of variables
+  addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
+  -- rename free variables before adding the condition:
+  setCondition $ map (expandExpr (map (\(nv,(v,t)) -> (v,t,Var nv))
+                                      (zip newfvars freenfcargs))) fcond
   printIfVerb 2 $ "CHECKING FUNCTION " ++ snd qf
   ctype    <- getCallType qf (length vs)
   rhstypes <- mapM (\f -> getCallType f 0) (funcsInExpr exp)
@@ -849,7 +860,7 @@ showVarExpTypes = do
                    (vstVarExp st))
     vartypes <- getVarTypes
     lift $ putStr $ "Variable types\n" ++ showVarTypes vartypes
-    cond <- getCondition
+    cond <- getExpandedCondition
     lift $ putStrLn $ "Current condition: " ++ showSimpExp (fcAnds cond)
 
 -- Verify an expression (if the first argument is `True`) and,
@@ -965,8 +976,8 @@ verifyFuncCall exp qf vs = do
 -- Verify the non-trivial abstract type or non-fail condition
 --  of a function call.
 verifyNonTrivFuncCall :: TermDomain a => Expr -> QName -> [Int]
-                      -> ACallType a -> [Expr] -> VerifyStateM a ()
-verifyNonTrivFuncCall exp qf vs atype nfcond = do
+                      -> ACallType a -> NonFailCond -> VerifyStateM a ()
+verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
   incrNonTrivialCall
   currfn <- getCurrentFuncName
   printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
@@ -974,11 +985,15 @@ verifyNonTrivFuncCall exp qf vs atype nfcond = do
                   " w.r.t. call type: " ++ prettyFunCallAType atype
   st <- get
   -- compute the precondition for this call by renaming the arguments:
+  let (nfcargs,freenfcargs) = partition ((`elem` [1 .. length vs]) . fst) nfcvars
+  newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
+  -- add renamed free variables of condition to the current set of variables
+  addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
+  -- rename variable in condition:
+  let rnmcvars = map (\(nv,(v,t)) -> (v,t,Var nv)) (zip vs nfcargs) ++
+                 map (\(nv,(v,t)) -> (v,t,Var nv)) (zip newfvars freenfcargs)
   let callcond = map (expandExpr (vstVarExp st))
-                     (map (expandExpr (zip3 [1 .. length vs]
-                                            (repeat unknownType)
-                                            (map Var vs)))
-                          nfcond)
+                     (map (expandExpr rnmcvars) nfcond)
   unless (null callcond) $ printIfVerb 2 $
     "and call condition: " ++ showSimpExp (fcAnds callcond)
   showVarExpTypes
@@ -1032,7 +1047,8 @@ checkDivOpNonZero exp cont = case exp of
                  v2 <- verifyExpr True arg2
                  let nfcond = [Comb FuncCall ("Prelude","/=")
                                     [Var v2, Lit (Intc 0)]]
-                 verifyNonTrivFuncCall exp qf [v1,v2] failACallType nfcond
+                 verifyNonTrivFuncCall exp qf [v1,v2] failACallType
+                   ([(v2, TCons (pre "Int") [])], nfcond)
                  cont
   _ -> cont
  where
@@ -1094,12 +1110,13 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
           unless (null unsatcons) $ do
             printIfVerb 2 $
               "UNCOVERED CONSTRUCTORS: " ++ unwords (map snd unsatcons)
-            setNewFunCondition currfn [fcFalse]
+            setNewFunCondition currfn nfcFalse
             addMissingCase exp unsatcons
  where
   -- check whether a constructor is excluded by the current call condition:
   checkMissCons cs = do
     opts  <- getToolOptions
+    printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
     let iscons = Comb FuncCall (pre $ "is-" ++ transOpName cs) [Var casevar]
     unsat <- if optSMT opts then do bcond  <- getExpandedCondition
                                     isUnsatisfiable (fcAnds (iscons:bcond))
@@ -1264,12 +1281,20 @@ isImpliedBy precond imp = do
 nonfailSuffix :: String
 nonfailSuffix = "'nonfail"
 
-nonFailCondsOfModule :: Prog -> [(QName,[Expr])]
+--- Extracts explicit non-fail conditions specified in a module as
+--- operations with suffix `'nonfail`.
+nonFailCondsOfModule :: Prog -> [(QName,NonFailCond)]
 nonFailCondsOfModule prog = map toNFCond nfconds
  where
   toNFCond fdecl = (stripNF (funcName fdecl),
-                    [trRule (\_ exp -> exp) (const fcTrue) (funcRule fdecl)])
+                    (ruleTVars,
+                     [trRule (\_ exp -> exp) (const fcTrue) (funcRule fdecl)]))
+   where
+    ruleTVars = zip (trRule (\args _ -> args) (const []) (funcRule fdecl))
+                    (argTypes (funcType fdecl))
+
   stripNF (mn,fn) = (mn, take (length fn - length nonfailSuffix) fn)
+
   nfconds = filter ((nonfailSuffix `isSuffixOf`) . snd . funcName)
                    (progFuncs prog)
 
