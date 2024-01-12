@@ -26,6 +26,7 @@ fcNot e = case e of
   Comb FuncCall qf [e1]    | qf == pre "not"   -> e1
   Comb FuncCall qf [e1,e2] | qf == pre "&&"    -> fcOr  (fcNot e1) (fcNot e2)
                            | qf == pre "||"    -> fcAnd (fcNot e1) (fcNot e2)
+  Case ct ce brs -> Case ct ce (map (\(Branch p be) -> Branch p (fcNot be)) brs)
   _                                            -> Comb FuncCall (pre "not") [e]
 
 -- Disjunction of two expressions.

@@ -325,7 +325,7 @@ substTerm sub term = case term of
   TSVar  _ -> term
   TComb f args -> TComb (substQId sub f) (map (substTerm sub) args)
   Forall svs arg -> Forall (map (substSV sub) svs) (substTerm sub arg)
-  Exists svs arg -> Forall (map (substSV sub) svs) (substTerm sub arg)
+  Exists svs arg -> Exists (map (substSV sub) svs) (substTerm sub arg)
   Let bs e -> Let (map (\ (v,s) -> (v, substTerm sub s)) bs) (substTerm sub e)
   Match e ps -> Match (substTerm sub e) (map (\(v,s) -> (v, substTerm sub s)) ps)
 
@@ -353,7 +353,7 @@ rnmTerm rnm term = case term of
   TSVar  _ -> term
   TComb f args -> TComb (rnmQId rnm f) (map (rnmTerm rnm) args)
   Forall svs arg -> Forall svs (rnmTerm rnm arg)
-  Exists svs arg -> Forall svs (rnmTerm rnm arg)
+  Exists svs arg -> Exists svs (rnmTerm rnm arg)
   Let bs e -> Let (map (\ (v,s) -> (v, rnmTerm rnm s)) bs) (rnmTerm rnm e)
   Match e ps -> Match (rnmTerm rnm e) (map (\ (v,s) -> (v, rnmTerm rnm s)) ps)
 
@@ -570,7 +570,7 @@ rnmQIdWithTInstTerm sigs term = case term of
   TComb f args -> TComb (rnmQIdWithTInst sigs f)
                         (map (rnmQIdWithTInstTerm sigs) args)
   Forall svs arg -> Forall svs (rnmQIdWithTInstTerm sigs arg)
-  Exists svs arg -> Forall svs (rnmQIdWithTInstTerm sigs arg)
+  Exists svs arg -> Exists svs (rnmQIdWithTInstTerm sigs arg)
   Let bs e -> Let (map (\ (v,s) -> (v, rnmQIdWithTInstTerm sigs s)) bs)
                   (rnmQIdWithTInstTerm sigs e)
   Match e ps -> Match (rnmQIdWithTInstTerm sigs e)

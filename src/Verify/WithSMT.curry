@@ -8,15 +8,15 @@
 module Verify.WithSMT
  where
 
-import Control.Monad      ( unless, when )
+import Control.Monad     ( unless, when )
 import Data.IORef
-import Data.List          ( find, isPrefixOf, nub, partition, union )
-import Data.Maybe         ( catMaybes, fromMaybe, isJust )
-import Numeric            ( readHex )
-import System.CPUTime     ( getCPUTime )
+import Data.List         ( find, init, isPrefixOf, last, nub, partition, union )
+import Data.Maybe        ( catMaybes, fromMaybe, isJust )
+import Numeric           ( readHex )
+import System.CPUTime    ( getCPUTime )
 import Debug.Trace
 
-import FlatCurry.Files    ( readFlatCurry )
+import FlatCurry.Files   ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Names
 import FlatCurry.Print
@@ -56,7 +56,7 @@ checkImplicationWithSMT' :: Options -> QName -> String -> IORef [Prog]
                          -> [(Int,TypeExpr)] -> Term -> Term -> IO (Maybe Bool)
 checkImplicationWithSMT' opts qf scripttitle modsref vartypes assertion
                          imp = flip catch (\e -> print e >> return Nothing) $ do
-  let (pretypes,usertypes) =
+  let (pretypes,_ {-usertypes-}) =
          partition ((== "Prelude") . fst)
                    (foldr union [] (map (tconsOfTypeExpr . snd) vartypes))
   let allsyms = catMaybes
@@ -65,7 +65,7 @@ checkImplicationWithSMT' opts qf scripttitle modsref vartypes assertion
                          (allQIdsOfTerm (tConj [assertion, imp]))))
   unless (null allsyms) $ printWhenDetails opts $
     "Translating operations into SMT: " ++ unwords (map showQName allsyms)
-  fdecls <- getAllFunctions opts modsref (map pre ["chr", "ord"]) (nub allsyms)
+  fdecls <- getAllFunctions opts modsref (nub allsyms)
   --smtfuncs <- funcs2SMT opts modsref allsyms
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
                                   show (map funcName fdecls))
@@ -311,7 +311,7 @@ ilog n | n>0 = if n<10 then 0 else 1 + ilog (n `div` 10)
 funcs2SMT :: Options -> IORef [Prog] -> [QName] -> IO Command
 funcs2SMT opts modsref qns = do
   -- get all relevant functions but exclude character related operations:
-  funs <- getAllFunctions opts modsref (map pre ["chr", "ord"]) (nub qns)
+  funs <- getAllFunctions opts modsref (nub qns)
   return $ maybe (Comment $ "ERROR translating " ++ show (map funcName funs))
                  DefineSigsRec
                  (mapM fun2SMT funs)
@@ -359,11 +359,7 @@ exp2SMT :: Maybe Term -> Expr -> Maybe Term
 exp2SMT lhs exp = case exp of
   Var i          -> Just $ makeRHS (TSVar i)
   Lit l          -> Just $ makeRHS (lit2SMT l)
-  Comb _ qf args -> do targs <- mapM (exp2SMT Nothing) args
-                       return $ if qf `elem` map pre ["chr","ord"] &&
-                                   length targs == 1
-                                  then makeRHS (head targs) -- chars are ints
-                                  else makeRHS (tComb (transOpName qf) targs)
+  Comb _ qf args -> mapM (exp2SMT Nothing) args >>= comb2SMT qf
   Case _ e bs -> do t <- exp2SMT Nothing e
                     bts <- mapM branch2SMT bs
                     return $ makeRHS (Match t bts)
@@ -378,6 +374,12 @@ exp2SMT lhs exp = case exp of
                     t2 <- exp2SMT lhs e2
                     return $ tDisj [t1,t2]
  where
+  comb2SMT qf targs
+    | qf `elem` map pre ["chr", "ord"] && length targs == 1
+    = return $ makeRHS (head targs) -- chars are integers --> no conversion
+    | otherwise
+    = return $ makeRHS (tComb (transOpName qf) targs)
+
   makeRHS rhs = maybe rhs (\l -> tEqu l rhs) lhs
 
   branch2SMT (Branch (LPattern _) _) = Nothing -- literal patterns not supported
@@ -511,6 +513,7 @@ primNames =
   ,("Just","Just")
   ,("Left","Left")
   ,("Right","Right")
+  ,("_","_") -- for anonymous patterns in case expressions
   ] ++
   map (\i -> ('(' : take (i-1) (repeat ',') ++ ")", "Tuple" ++ show i)) [3..15]
 
@@ -520,15 +523,14 @@ primNames =
 --- The first argument is the list of all function declarations.
 --- The second argument is a list of function names that will be excluded
 --- (together with the functions called by them).
-getAllFunctions :: Options -> IORef [Prog] -> [QName] -> [QName]
-                -> IO [FuncDecl]
-getAllFunctions opts modsref excluded newfuns = do
+getAllFunctions :: Options -> IORef [Prog] -> [QName] -> IO [FuncDecl]
+getAllFunctions opts modsref newfuns = do
   mods <- readIORef modsref
   getAllFuncs mods [] newfuns
  where
   getAllFuncs _       currfuncs [] = return (reverse currfuncs)
   getAllFuncs allmods currfuncs (newfun:newfuncs)
-    | newfun `elem` excluded ||
+    | newfun `elem` excludedCurryOpts ||
       newfun `elem` map (pre . fst) primNames ||
       newfun `elem` map funcName currfuncs || isPrimOp newfun ||
       isTestPred newfun
@@ -537,7 +539,8 @@ getAllFunctions opts modsref excluded newfuns = do
     = maybe (error $ "getAllFunctions: " ++ show newfun ++ " not found!")
             (\fdecl -> getAllFuncs allmods (fdecl : currfuncs)
                          (newfuncs ++
-                          filter (`notElem` excluded) (funcsOfFuncDecl fdecl)))
+                          filter (`notElem` excludedCurryOpts)
+                                 (funcsOfFuncDecl fdecl)))
             (find (\fd -> funcName fd == newfun)
                   (maybe []
                          progFuncs
@@ -552,6 +555,11 @@ getAllFunctions opts modsref excluded newfuns = do
          getAllFuncs newmods currfuncs (newfun:newfuncs)
 
   isTestPred (mn,fn) = mn == "Prelude" && "is-" `isPrefixOf` fn
+
+--- Exclude character-related operations since characters are treated as
+--- integers so that these operations are not required.
+excludedCurryOpts :: [QName]
+excludedCurryOpts = map pre ["chr", "ord"]
 
 --- Returns the names of all functions occurring in the
 --- body of a function declaration.
