@@ -1,5 +1,5 @@
 -----------------------------------------------------------------------------
---- Auxiliaries to build FlatCurry expressions.
+--- Auxiliaries to build FlatCurry types and expressions.
 ---
 --- @author  Michael Hanus
 --- @version December 2023
@@ -12,6 +12,22 @@ module FlatCurry.Build
 import FlatCurry.Types
 
 ------------------------------------------------------------------------------
+-- Types:
+
+--- The FlatCurry type `Bool`.
+fcBool :: TypeExpr
+fcBool = TCons (pre "Bool") []
+
+--- The FlatCurry type `Int`.
+fcInt:: TypeExpr
+fcInt = TCons (pre "Int") []
+
+--- Constructs a FlatCurry type list.
+fcList :: TypeExpr -> TypeExpr
+fcList te = TCons (pre "[]") [te]
+
+------------------------------------------------------------------------------
+-- Expressions:
 
 fcTrue :: Expr
 fcTrue = Comb ConsCall (pre "True") []
@@ -54,7 +70,7 @@ fcEqu :: Expr -> Expr -> Expr
 fcEqu e1 e2 = Comb FuncCall (pre "==") [e1,e2]
 
 ----------------------------------------------------------------------------
-
+--- Transform name into Prelude-qualified name.
 pre :: String -> QName
 pre f = ("Prelude",f)
 

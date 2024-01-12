@@ -41,6 +41,7 @@ import System.FilePath            ( (</>) )
 import System.Path                ( fileInPath )
 
 -- Imports from package modules:
+import FlatCurry.Build            ( pre )
 import Verify.CallTypes
 import Verify.Files
 import Verify.Helpers
@@ -1030,7 +1031,7 @@ checkDivOpNonZero exp cont = case exp of
                  v2 <- verifyExpr True arg2
                  let nfcond = Comb FuncCall (pre "/=") [Var v2, Lit (Intc 0)]
                  verifyNonTrivFuncCall exp qf [v1,v2] failACallType
-                   ([(v2, TCons (pre "Int") [])], nfcond)
+                   ([(v2, fcInt)], nfcond)
                  cont
   _ -> cont
  where
@@ -1229,32 +1230,15 @@ isUnsatisfiable :: TermDomain a => Expr -> VerifyStateM a Bool
 isUnsatisfiable bexp = do
   vts <- fmap (map (\(v,te,_) -> (v,te))) getVarExps
   st <- get
-  let allvs    = allVars bexp
+  let allvs    = allFreeVars bexp
       vtypes   = filter ((`elem` allvs) . fst) vts
-      question = "IS '" ++ showSimpExp bexp ++ "' UNSATISFIABLE? "
+      question = "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE? "
   fname  <- getCurrentFuncName
   unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
     "WARNING in operation '" ++ snd fname ++
     "': missing variables in unsatisfiability check!"
-  answer <- lift $ checkImplicationWithSMT (vstToolOpts st) fname question
-                     (vstModules st) vtypes bexp fcFalse
-  return (maybe False id answer)
-
---- Checks whether one Boolean expression implies another one w.r.t. a set
---- of variables (second argument) with an SMT solver.
-isImpliedBy :: TermDomain a => Expr -> Expr -> VerifyStateM a Bool
-isImpliedBy precond imp = do
-  vts <- fmap (map (\(v,te,_) -> (v,te))) getVarExps
-  st <- get
-  let allvs    = allVars precond ++ allVars imp
-      vtypes   = filter ((`elem` allvs) . fst) vts
-      question = "DOES " ++ showSimpExp precond ++ " IMPLY " ++ showSimpExp imp
-  fname <- getCurrentFuncName
-  unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
-    "WARNING in operation '" ++ snd fname ++
-    "': missing variables in implication check!"
-  answer <- lift $ checkImplicationWithSMT (vstToolOpts st) fname question
-                     (vstModules st) vtypes precond imp
+  answer <- lift $ checkUnsatisfiabilityWithSMT (vstToolOpts st) fname question
+                                                (vstModules st) vtypes bexp
   return (maybe False id answer)
 
 ------------------------------------------------------------------------------

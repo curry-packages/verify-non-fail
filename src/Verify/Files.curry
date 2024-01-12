@@ -39,6 +39,7 @@ import System.FilePath      ( (</>), (<.>), dropDrive, dropFileName, isAbsolute
 import System.IOExts        ( evalCmd, readCompleteFile )
 import System.Process       ( system )
 
+import FlatCurry.Build      ( pre )
 import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
 import Verify.Helpers

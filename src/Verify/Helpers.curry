@@ -18,6 +18,7 @@ import FlatCurry.Types
 import System.CurryPath   ( lookupModuleSourceInLoadPath )
 import System.Directory   ( getModificationTime )
 
+import FlatCurry.Build
 import Verify.Options     ( Options, printWhenStatus )
 
 ------------------------------------------------------------------------------
@@ -170,10 +171,6 @@ isFreshVarPos :: Pos -> Bool
 isFreshVarPos = null
 
 ------------------------------------------------------------------------------
---- Transform name into Prelude-qualified name.
-pre :: String -> QName
-pre f = ("Prelude",f)
-
 --- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
 getSiblingsOf :: [[(QName,Int)]] -> QName -> Maybe [(QName,Int)]
 getSiblingsOf allcons qc =

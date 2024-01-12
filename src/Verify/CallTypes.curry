@@ -2,7 +2,7 @@
 --- The definition of call types and an operation to infer them.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version January 2024
 ------------------------------------------------------------------------------
 
 module Verify.CallTypes where
@@ -14,6 +14,7 @@ import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Types
 
+import FlatCurry.Build     ( pre )
 import Verify.Helpers
 import Verify.Options
 

@@ -44,6 +44,7 @@ import System.Process             ( exitWith, system )
 import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
 
 -- Imports from package modules:
+import FlatCurry.Build            ( pre )
 import Verify.CallTypes
 import Verify.Domain
 import Verify.Files

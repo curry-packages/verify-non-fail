@@ -16,6 +16,7 @@ import Numeric           ( readHex )
 import System.CPUTime    ( getCPUTime )
 import Debug.Trace
 
+import FlatCurry.Build
 import FlatCurry.Files   ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Names
@@ -36,33 +37,29 @@ import PackageConfig      ( getPackagePath )
 -- property (represented as FlatCurry expressions).
 -- If the implication is `False`, the unsatisfiability of the assertion
 -- is checked.
-checkImplicationWithSMT :: Options -> QName -> String -> IORef [Prog]
-                        -> [(Int,TypeExpr)] -> Expr -> Expr -> IO (Maybe Bool)
-checkImplicationWithSMT opts qf scripttitle modsref vartypes
-                        assertionexp impexp = do
-  maybe (transExpError assertionexp)
-        (\assertion ->
-           maybe (transExpError impexp)
-                 (checkImplicationWithSMT' opts qf scripttitle modsref vartypes
-                                           assertion)
-                 (exp2SMT Nothing (simpExpr impexp)))
-        (exp2SMT Nothing (simpExpr assertionexp))
+checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef [Prog]
+                             -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
+checkUnsatisfiabilityWithSMT opts qf scripttitle modsref vartypes assertionexp =
+  maybe
+    (transExpError assertionexp)
+    (\assertion ->
+       catch (checkUnsatWithSMT opts qf scripttitle modsref vartypes assertion)
+             (\e -> print e >> return Nothing))
+    (exp2SMT Nothing (simpExpr assertionexp))
  where
   transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
 
-
-checkImplicationWithSMT' :: Options -> QName -> String -> IORef [Prog]
-                         -> [(Int,TypeExpr)] -> Term -> Term -> IO (Maybe Bool)
-checkImplicationWithSMT' opts qf scripttitle modsref vartypes assertion
-                         imp = flip catch (\e -> print e >> return Nothing) $ do
+checkUnsatWithSMT :: Options -> QName -> String -> IORef [Prog]
+                  -> [(Int,TypeExpr)] -> Term -> IO (Maybe Bool)
+checkUnsatWithSMT opts qf title modsref vartypes assertion =
+  flip catch (\e -> print e >> return Nothing) $ do
   let (pretypes,_ {-usertypes-}) =
          partition ((== "Prelude") . fst)
                    (foldr union [] (map (tconsOfTypeExpr . snd) vartypes))
   let allsyms = catMaybes
                   (map (\n -> maybe Nothing Just (untransOpName n))
-                       (map qidName
-                         (allQIdsOfTerm (tConj [assertion, imp]))))
+                       (map qidName (allQIdsOfTerm assertion)))
   unless (null allsyms) $ printWhenDetails opts $
     "Translating operations into SMT: " ++ unwords (map showQName allsyms)
   fdecls <- getAllFunctions opts modsref (nub allsyms)
@@ -80,11 +77,8 @@ checkImplicationWithSMT' opts qf scripttitle modsref vartypes assertion
       tsubst = makeTPSubst (map (\n -> (n, SComb "TVar" [])) tvarsInVars)
       varsorts = map (\(i,te) -> (i, substSort tsubst (type2sort te))) vartypes
       tassertion = addSortsInTerm fdecls varsorts assertion
-      timp       = addSortsInTerm fdecls varsorts imp
   --putStrLn $ "Assertion: " ++ pPrint (pretty tassertion)
-  --putStrLn $ "Implication: " ++ pPrint (pretty timp)
-  let smt   = [ Comment "for polymorphic types:", DeclareSort "TVar" 0] ++
-              --concatMap preludeType2SMT (map snd pretypes) ++
+  let smt   = --concatMap preludeType2SMT (map snd pretypes) ++
               [ EmptyLine ] ++
               (if null decls
                  then []
@@ -96,25 +90,19 @@ checkImplicationWithSMT' opts qf scripttitle modsref vartypes assertion
               [ EmptyLine
               , Comment "Boolean formula of assertion (known properties):"
               , sAssert tassertion, EmptyLine
-              --, Comment "Bindings of implication:"
-              --, sAssert impbindings, EmptyLine
-              , Comment "Assert negated implication:"
-              , sAssert (tNot timp), EmptyLine
               , Comment "check satisfiability:"
               , CheckSat
-              , Comment "if unsat, the implication is valid"
               ]
   --putStrLn $ "SMT commands as Curry term:\n" ++ show smt
-  smtprelude <- if all ((`elem` ["Int","Float","Bool", "Char", "[]"]) . snd)
-                       pretypes 
-                  then return ""
-                  else do pp <- getPackagePath
-                          readFile (pp </> "include" </> "Prelude.smt")
-  let scripttitle' = map (\c -> if c == '\n' then ' ' else c) scripttitle ++
-                     "\n\n(set-option :smt.mbqi false)"
+  pp <- getPackagePath
+  smtprelude <- readFile (pp </> "include" </>
+                  if all ((`elem` ["Int","Float","Bool", "Char", "[]"]) . snd)
+                     pretypes then "Prelude_min.smt"
+                              else "Prelude.smt")
+  let scripttitle = unlines (map ("; "++) (lines title))
   printWhenAll opts $
-    "RAW SMT SCRIPT:\n;" ++ scripttitle' ++ "\n\n" ++ showSMTRaw smt
-  let smtinput = "; " ++ scripttitle' ++ "\n\n" ++ smtprelude ++ showSMT smt
+    "RAW SMT SCRIPT:\n" ++ scripttitle ++ "\n\n" ++ showSMTRaw smt
+  let smtinput = scripttitle ++ "\n" ++ smtprelude ++ showSMT smt
   printWhenDetails opts $ "SMT SCRIPT:\n" ++ showWithLineNums smtinput
   let z3opts = ["-smt2", "-T:2"]
   when (optStoreSMT opts) $ do
@@ -247,7 +235,7 @@ addSortsInTerm fdecls vsorts term = fst (addSort vsorts term)
   
   transSimpleID n =
     maybe (if n `elem` [ "and", "or", "not", "=", "/=", "<", ">", "<=", ">="
-                       , "true", "false", "nil", "insert" ] ||
+                       , "true", "false", "unit", "nil", "insert" ] ||
               "is-" `isPrefixOf` n
              then Id n
              else trace ("\nSIMPLE OPERATION " ++ n ++ " NOT FOUND!") $ Id n)
@@ -526,7 +514,7 @@ primNames =
 getAllFunctions :: Options -> IORef [Prog] -> [QName] -> IO [FuncDecl]
 getAllFunctions opts modsref newfuns = do
   mods <- readIORef modsref
-  getAllFuncs mods [] newfuns
+  getAllFuncs mods preloadedFuncDecls newfuns
  where
   getAllFuncs _       currfuncs [] = return (reverse currfuncs)
   getAllFuncs allmods currfuncs (newfun:newfuncs)
@@ -537,7 +525,8 @@ getAllFunctions opts modsref newfuns = do
     = getAllFuncs allmods currfuncs newfuncs
     | fst newfun `elem` map progName allmods
     = maybe (error $ "getAllFunctions: " ++ show newfun ++ " not found!")
-            (\fdecl -> getAllFuncs allmods (fdecl : currfuncs)
+            (\fdecl -> --print fdecl >>
+                       getAllFuncs allmods (fdecl : currfuncs)
                          (newfuncs ++
                           filter (`notElem` excludedCurryOpts)
                                  (funcsOfFuncDecl fdecl)))
@@ -555,6 +544,17 @@ getAllFunctions opts modsref newfuns = do
          getAllFuncs newmods currfuncs (newfun:newfuncs)
 
   isTestPred (mn,fn) = mn == "Prelude" && "is-" `isPrefixOf` fn
+
+-- Pre-loaded operations from the prelude to avoid reading the prelude
+-- for simple operations.
+preloadedFuncDecls :: [FuncDecl]
+preloadedFuncDecls =
+  [Func (pre "null") 1 Public 
+     (FuncType (fcList (TVar 0)) fcBool)
+     (Rule [1] (Case Flex (Var 1)
+                  [Branch (Pattern (pre "[]") [])   fcTrue,
+                   Branch (Pattern (pre ":") [2,3]) fcFalse]))
+  ]
 
 --- Exclude character-related operations since characters are treated as
 --- integers so that these operations are not required.
