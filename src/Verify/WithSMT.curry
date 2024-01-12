@@ -170,10 +170,7 @@ addSortsInTerm fdecls vsorts term = fst (addSort vsorts term)
     TComb qi ts -> let (tts,sts) = unzip (map (addSort vts) ts)
                        tqid  = transQId sts qi
                        rtype = resultTypeOfFuncSort (length tts) (qidSort tqid)
-                   in (TComb tqid tts,
-                       if qidName qi == "insert"
-                         then SComb "List" [head sts] -- TODO: improve handling
-                         else consResultSort rtype qi sts)
+                   in (TComb tqid tts, consResultSort rtype qi sts)
     Forall svs qt ->
       let (qts,qs) = addSort (map (\(SV v s) -> (v,s)) svs ++ vts) qt
       in (Forall svs qts, qs)
@@ -213,6 +210,7 @@ addSortsInTerm fdecls vsorts term = fst (addSort vsorts term)
                               (matchSort rt csort))
           (lookup (qidName ct) simpleConsTypes)
 
+  -- a list of data constructors and their types
   simpleConsTypes = -- TODO: GENERALIZE!
     [ ("insert", ([SComb "TVar1" [], SComb "List" [SComb "TVar1" []]],
                    SComb "List" [SComb "TVar1" []]))

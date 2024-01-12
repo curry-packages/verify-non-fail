@@ -297,8 +297,10 @@ makeTPSubst = FM.fromList
 --- Compute sort matching, i.e., if `matchSort t1 t2 = s`, then `t2 = s(t1)`.
 matchSort :: Sort -> Sort -> Maybe TPSubst
 matchSort s1@(SComb sn1 ss1) s2@(SComb sn2 ss2)
+ | isAnonymousType s2
+ = Just emptyTPSubst
  | isTypeParameter s1
- = Just $ if s1 == s2 || isAnonymousType s2
+ = Just $ if s1 == s2
             then emptyTPSubst
             else FM.insert (head (typeParamsOfSort s1)) s2 emptyTPSubst
  | otherwise
