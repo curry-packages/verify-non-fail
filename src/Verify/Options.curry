@@ -34,6 +34,7 @@ data Options = Options
   , optFunction    :: String -- show the result for this function
   , optImports     :: Bool -- read/analyze imports/prelude? (only for testing)
   , optDeleteCache :: Bool -- delete the analysis cache?
+  , optEnforceNF   :: Bool -- eval data to normal form (to avoid mem leaks)?
   , optRerun       :: Bool -- rerun verification of current module
   , optPublic      :: Bool -- show types (call, in/out) of public ops only? 
   , optCallTypes   :: Bool -- show call types
@@ -51,8 +52,8 @@ data Options = Options
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
-  Options 1 False "" True False False True False False True True False False
-          False False False ""
+  Options 1 False "" True False False False True False False True True False
+          False False False False ""
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -129,6 +130,9 @@ options =
   , Option "t" ["time"]
            (NoArg (\opts -> opts { optTime = True }))
            "show total verification time for each module"
+  , Option "" ["withnf"]
+           (NoArg (\opts -> opts { optEnforceNF = True }))
+           ("evaluate verification data to normal form\n(to avoid memory leaks)")
   ]
  where
   safeReadNat opttrans s opts = case readNat s of

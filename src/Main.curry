@@ -38,6 +38,7 @@ import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist
                                   , removeDirectory )
 import System.FilePath            ( (</>) )
+import System.IO                  ( hFlush, stdout )
 import System.Path                ( fileInPath )
 
 -- Imports from package modules:
@@ -60,7 +61,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 12/01/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 13/01/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -1215,8 +1216,9 @@ anyTypes n = take n (repeat anyType)
 -- I/O action to force evaluation of the argument to normal form.
 enforceNormalForm :: Options -> String -> a -> IO ()
 enforceNormalForm opts s x
-  | curryCompiler == "kics2"
-  = do whenStatus opts $ putStr $ "ENFORCE NORMAL FORM OF " ++ s ++ "..."
+  | optEnforceNF opts
+  = do whenStatus opts $ putStr $ "EVALUATE " ++ s ++ " TO NORMAL FORM..."
+       hFlush stdout
        (id $!! x) `seq` return ()
        printWhenStatus opts "DONE"
   | otherwise
