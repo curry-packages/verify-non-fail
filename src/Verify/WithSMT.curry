@@ -69,8 +69,8 @@ checkUnsatWithSMT opts qf title modsref vartypes assertion =
                        (\fds -> addSortsInCmd fdecls [] (DefineSigsRec fds))
                        (mapM fun2SMT fdecls)
   --putStrLn $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
-  let decls = map (maybe (error "Internal error: some datatype not found!") id)
-                  [] --(map (tdeclOf vst) usertypes)
+  let --decls = map (maybe (error "Internal error: some datatype not found!") id)
+      --            [] --(map (tdeclOf vst) usertypes)
       -- substitute type parameters in variables by `TVar`:
       tvarsInVars = foldr union []
                       (map (typeParamsOfSort . type2sort . snd) vartypes)
@@ -80,10 +80,10 @@ checkUnsatWithSMT opts qf title modsref vartypes assertion =
   --putStrLn $ "Assertion: " ++ pPrint (pretty tassertion)
   let smt   = --concatMap preludeType2SMT (map snd pretypes) ++
               [ EmptyLine ] ++
-              (if null decls
-                 then []
-                 else [ Comment "User-defined datatypes:" ] ++
-                      []) ++ -- map tdecl2SMT decls) ++
+              --(if null decls
+              --   then []
+              --   else [ Comment "User-defined datatypes:" ] ++
+              --        map tdecl2SMT decls) ++
               [ EmptyLine, smtfuncs, EmptyLine
               , Comment "Free variables:" ] ++
               map (\(i,s) -> DeclareVar (SV i s)) varsorts ++

@@ -417,10 +417,10 @@ writeSpecModule opts mname fdecls pubntcalltypes funconds = do
           --"- either under '" ++ includepath ++ "'\n" ++
           --"- or in the source directory of module '" ++ mname ++ "'\n"
 
---- Transforms call types to an AbstractCurry module which can be read
---- with `readCallTypeSpecMod`.
+--- Transforms call types and non-fail condition into human-readable
+--- Curry programan.
 callTypeCond2SpecMod :: TermDomain a => String -> [FuncDecl]
-                -> [(QName,ACallType a)] -> [(QName,NonFailCond)] -> String
+                     -> [(QName,ACallType a)] -> [(QName,NonFailCond)] -> String
 callTypeCond2SpecMod mname fdecls functs funconds =
   showCProg (simpleCurryProg specmname [] []
                              (map ct2fun (filter hasNoNFCond functs)) []) ++
@@ -432,14 +432,14 @@ callTypeCond2SpecMod mname fdecls functs funconds =
 
   ct2fun ((_,fn), cts) =
     cmtfunc
-      ("Required call type of operation `" ++ fn ++ "`:")
+      ("Required call type of operation `" ++ fn ++ "` (pretty printed):")
       (specmname, encodeContractName $ fn ++ "'calltype") 0 Public
       (emptyClassType stringType)
-      [simpleRule [] (string2ac (show cts))]
+      [simpleRule [] (string2ac (prettyFunCallAType cts))]
 
 ------------------------------------------------------------------------------
 --- Transforms call types to an AbstractCurry module which can be read
---- with `readCallTypeSpecMod`.
+--- with `readCallTypeSpecMod` (deprecated)
 callTypes2SpecMod :: String -> [(QName,[[CallType]])] -> CurryProg
 callTypes2SpecMod mname functs =
   simpleCurryProg specmname [] [] (map ct2fun functs) []

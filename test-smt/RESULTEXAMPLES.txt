@@ -3,6 +3,7 @@ fac: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `fac`:
 fac'nonfail :: Int -> Bool
 fac'nonfail v1 = (v1 == 0) || (v1 > 0)
 
@@ -11,6 +12,7 @@ fac1: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `fac1`:
 fac1'nonfail :: Int -> Int -> Bool
 fac1'nonfail v1 v2 = ((v2 + 5) == 0) || ((v2 + 5) > 0)
 
@@ -22,15 +24,19 @@ gt3: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `gt3`:
 gt3'nonfail :: Int -> Bool
 gt3'nonfail v1 = v1 > 3
 
+-- Non-fail condition of operation `fac`:
 fac'nonfail :: Int -> Bool
 fac'nonfail v1 = (v1 == 0) || (v1 > 0)
 
+-- Non-fail condition of operation `fac5`:
 fac5'nonfail :: Int -> Int -> Bool
 fac5'nonfail v1 v2 = ((v2 + 5) == 0) || ((v2 + 5) > 0)
 
+-- Non-fail condition of operation `facNeg`:
 facNeg'nonfail :: Int -> Bool
 facNeg'nonfail v1 = (v1 > 0) || (v1 > 3)
 
@@ -39,6 +45,7 @@ div1: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `div1`:
 div1'nonfail :: Int -> Int -> Bool
 div1'nonfail v1 v2 = v2 /= 0
 
@@ -51,6 +58,7 @@ f: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `f`:
 f'nonfail :: [a] -> Bool
 f'nonfail v1 = (len v1) < 10
 
@@ -59,6 +67,7 @@ nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `nth`:
 nth'nonfail :: [a] -> Int -> Bool
 nth'nonfail v1 v2 = (v2 >= 0) && ((len (tak (v2 + 1) v1)) == (v2 + 1))
 
@@ -67,6 +76,7 @@ nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `nth`:
 nth'nonfail :: [a] -> Int -> Bool
 nth'nonfail v1 v2 = ((not (null v1)) && (case v1 of
     v3 : v4 -> (v2 == 0) || (not (v2 > 0))
@@ -79,6 +89,7 @@ nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `nth`:
 nth'nonfail :: [a] -> Int -> Bool
 nth'nonfail v1 v2 = (not (null v1)) && (case v1 of
     v3 : v4 -> v2 == 0
@@ -89,6 +100,7 @@ nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `nth`:
 nth'nonfail :: [a] -> Int -> Bool
 nth'nonfail v1 v2 = (not (null v1)) && (v2 == 0)
 
@@ -100,6 +112,7 @@ one: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `one`:
 one'nonfail :: Int -> Bool
 one'nonfail v1 = v1 == 0
 
@@ -108,6 +121,7 @@ headpos: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `headpos`:
 headpos'nonfail :: [Int] -> Bool
 headpos'nonfail v1 = (not (null v1)) && (case v1 of
     v2 : v3 -> v2 > 0
@@ -118,6 +132,7 @@ succChar: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
+-- Non-fail condition of operation `succChar`:
 succChar'nonfail :: Char -> Bool
 succChar'nonfail v1 = v1 < maxBound
 

@@ -138,7 +138,7 @@ verifyModule valueanalysis astore opts0 mname = do
                             (Map.fromList (iotypes ++ impiotypes))
                             nfconds opts
   let funusage = funcDecls2Usage mname fdecls
-  enforceNormalForm vstate
+  enforceNormalForm opts "VERIFYSTATE" vstate
   printWhenAll opts $ unlines $
     ("Function usage in module '" ++ mname ++ "':") :
     map (\ (qf, qfs) -> snd qf ++ ": used in " ++
@@ -270,7 +270,7 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
     "Operations with refined call types (used in future analyses):" :
     showFunResults prettyFunCallAType (reverse newfailures)
   let newcts = Map.union (Map.fromList newfailures) (vstCallTypes st)
-  enforceNormalForm newcts
+  enforceNormalForm opts "NEWCALLTYPES" newcts
   let (failconds,refineconds) =
          partition (\(qf,_) -> qf `elem` (map fst (vstFunConds st)))
                    (vstNewFunConds st)
@@ -1213,12 +1213,14 @@ anyTypes n = take n (repeat anyType)
 -- Utilities
 
 -- I/O action to force evaluation of the argument to normal form.
-enforceNormalForm :: a -> IO ()
-enforceNormalForm x
-  | curryCompiler == "kics2" = do putStrLn "ENFORCE NF..."
-                                  (id $!! x) `seq` return ()
-                                  putStrLn "DONE"
-  | otherwise                = return ()
+enforceNormalForm :: Options -> String -> a -> IO ()
+enforceNormalForm opts s x
+  | curryCompiler == "kics2"
+  = do whenStatus opts $ putStr $ "ENFORCE NORMAL FORM OF " ++ s ++ "..."
+       (id $!! x) `seq` return ()
+       printWhenStatus opts "DONE"
+  | otherwise
+  = return ()
 
 ------------------------------------------------------------------------------
 -- Shows the simplified expression.

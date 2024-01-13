@@ -81,7 +81,7 @@ nonFailCondsOfModule prog = map toNFCond nfconds
   nfconds = filter ((nonfailSuffix `isSuffixOf`) . snd . funcName)
                    (progFuncs prog)
 
-{-}
+{-
 preludeNonFailConds :: [(QName,[Expr])]
 preludeNonFailConds = map (\divop -> (pre divop, [arg2NonZero])) divops
  where
@@ -104,7 +104,8 @@ showConditions fdecls = unlines . map showCond
                        "showCondition: function '" ++ snd qf ++ "'' not found!")
                       id
                       (find (\fd -> funcName fd == qf) fdecls)
-    in "\n" ++ showFuncDecl (genNonFailFunction fdecl cnd)
+    in "\n-- Non-fail condition of operation `" ++ snd qf ++ "`:\n" ++
+       showFuncDecl (genNonFailFunction fdecl cnd)
 
 --- Generates the function representing the non-fail condition for a given
 --- function and non-fail condition.
