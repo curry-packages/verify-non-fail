@@ -42,7 +42,7 @@ data Options = Options
   , optSMT         :: Bool -- use SMT solver (Z3) to verify non-fail conditions?
   , optStoreSMT    :: Bool -- store generated SMT scripts (for debugging)
   , optError       :: Bool -- consider Prelude.error as failing operation?
-  , optModule      :: Bool -- generate a `..._CALLTYPES` module?
+  , optSpecModule  :: Bool -- generate a `..._SPEC` module?
   , optStats       :: Bool -- show and store statitics?
   , optTime        :: Bool -- show elapsed verification time?
   , optDomainID    :: String -- the unique id for the abstract term domain
@@ -105,9 +105,6 @@ options =
   , Option "i" ["iotypes"]
             (NoArg (\opts -> opts { optIOTypes = True }))
            "show input/output types"
-  --, Option "m" ["module"]
-  --         (NoArg (\opts -> opts { optModule = True }))
-  --         "write  a '..._CALLTYPES' module with required\ncall types"
   , Option "" ["noimports"]
            (NoArg (\opts -> opts { optImports = False }))
            "do not read/analyze imported modules (for testing)"
@@ -126,6 +123,9 @@ options =
   , Option "" ["storesmt"]
            (NoArg (\opts -> opts { optStoreSMT = True }))
            "store generated SMT scripts (for debugging)"
+  , Option "" ["storespec"]
+           (NoArg (\opts -> opts { optSpecModule = True }))
+           "store call types/conditions in '..._SPEC' module"
   , Option "t" ["time"]
            (NoArg (\opts -> opts { optTime = True }))
            "show total verification time for each module"

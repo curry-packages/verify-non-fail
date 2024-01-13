@@ -155,7 +155,8 @@ verifyModule valueanalysis astore opts mname = do
                             finalntacalltypes (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
-    storeTypes opts mname modcons finalacalltypes [] iotypes
+    storeTypes opts mname fdecls modcons finalacalltypes
+               (filter (isVisible . fst) finalacalltypes) [] iotypes
     storeStatistics opts mname stattxt statcsv
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
 

@@ -19,7 +19,7 @@ module Verify.Files
   where
 
 import Control.Monad        ( unless, when )
-import Data.List            ( intercalate, isPrefixOf, isSuffixOf, sortBy )
+import Data.List            ( find, intercalate, isPrefixOf, isSuffixOf, sortBy )
 
 import Curry.Compiler.Distribution ( installDir )
 
@@ -31,6 +31,7 @@ import AbstractCurry.Types hiding ( pre )
 import Analysis.TermDomain  ( TermDomain )
 import Contract.Names       ( decodeContractName, encodeContractName )
 import Data.Time            ( ClockTime, compareClockTime )
+import FlatCurry.Types      ( FuncDecl )
 import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
                             , modNameToPath )
 import System.Directory
@@ -117,19 +118,22 @@ getConsTypesFile opts mname = getVerifyCacheBaseFile opts mname "CONSTYPES"
 
 -- The name of the Curry module where the call type specifications are stored.
 callTypesModule :: String -> String
-callTypesModule mname = mname ++ "_CALLTYPES"
+callTypesModule mname = mname ++ "_CALLSPEC"
 
 ------------------------------------------------------------------------------
 --- Stores constructores, call types, non-fail conditions
 ---  and input/output types for a module.
 storeTypes :: TermDomain a => Options
            -> String                 -- module name
+           -> [FuncDecl]             -- functions of the module
            -> [[(QName,Int)]]        -- all constructors grouped by type
            -> [(QName,ACallType a)]  -- all inferred abstract call types
-           -> [(QName,NonFailCond)]       -- inferred non-fail conditions
+           -> [(QName,ACallType a)]  -- public non-trivial abstract call types
+           -> [(QName,NonFailCond)]  -- inferred non-fail conditions
            -> [(QName,InOutType a)]  -- all input output types
            -> IO ()
-storeTypes opts mname allcons acalltypes funconds iotypes = do
+storeTypes opts mname fdecls allcons acalltypes pubntcalltypes funconds
+           iotypes = do
   patfile <- getVerifyCacheBaseFile opts mname "..."
   printWhenAll opts $ "Caching analysis results at '" ++ patfile ++ "'"
   createDirectoryIfMissing True (dropFileName patfile)
@@ -144,8 +148,9 @@ storeTypes opts mname allcons acalltypes funconds iotypes = do
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod funconds)))
   writeFileAndReport iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
-  --when (optModule opts) $
-  --  writeCallTypeSpecMod opts mname (sortFunResults pubntcalltypes)
+  when (optSpecModule opts) $
+    writeSpecModule opts mname fdecls (sortFunResults pubntcalltypes)
+                    (sortFunResults funconds)
  where
   writeFileAndReport f s = do
     when (optVerb opts > 3) $ putStr $ "Writing cache file '" ++ f ++ "'..."
@@ -391,8 +396,9 @@ funArgsOfExp exp = case exp of
 --- Writes a Curry module file containing the non-trivial call types
 --- of a given module so that it can be read back with
 --- `readCallTypeSpecMod`.
-writeCallTypeSpecMod :: Options -> String -> [(QName,[[CallType]])] -> IO ()
-writeCallTypeSpecMod opts mname pubntcalltypes = do
+writeSpecModule :: TermDomain a => Options -> String -> [FuncDecl]
+                -> [(QName,ACallType a)] -> [(QName,NonFailCond)] -> IO ()
+writeSpecModule opts mname fdecls pubntcalltypes funconds = do
   let ctmname = callTypesModule mname
       ctfile  = ctmname ++ ".curry"
   exct <- doesFileExist ctfile
@@ -400,17 +406,38 @@ writeCallTypeSpecMod opts mname pubntcalltypes = do
     then when exct $ removeFile ctfile
     else do
       oldctmod <- if exct then readCompleteFile ctfile else return ""
-      let ctmod = showCProg (callTypes2SpecMod mname pubntcalltypes) ++ "\n"
-      unless (oldctmod == ctmod || not (optModule opts)) $ do
+      let ctmod = callTypeCond2SpecMod mname fdecls pubntcalltypes funconds
+      unless (oldctmod == ctmod || not (optSpecModule opts)) $ do
         writeFile ctfile ctmod
-        includepath <- fmap (</> "include") getPackagePath
+        --includepath <- fmap (</> "include") getPackagePath
         printWhenStatus opts $
-          "A Curry module '" ++ ctmname ++
-          "' with required call types is written to\n'" ++ ctfile ++ "'.\n" ++
-          "To use it for future verifications, store this module\n" ++
-          "- either under '" ++ includepath ++ "'\n" ++
-          "- or in the source directory of module '" ++ mname ++ "'\n"
+          "A Curry module '" ++ ctmname ++ "' with required call types\n" ++
+          "and non-fail conditions is written to: '" ++ ctfile ++ "'.\n" -- ++
+          --"To use it for future verifications, store this module\n" ++
+          --"- either under '" ++ includepath ++ "'\n" ++
+          --"- or in the source directory of module '" ++ mname ++ "'\n"
 
+--- Transforms call types to an AbstractCurry module which can be read
+--- with `readCallTypeSpecMod`.
+callTypeCond2SpecMod :: TermDomain a => String -> [FuncDecl]
+                -> [(QName,ACallType a)] -> [(QName,NonFailCond)] -> String
+callTypeCond2SpecMod mname fdecls functs funconds =
+  showCProg (simpleCurryProg specmname [] []
+                             (map ct2fun (filter hasNoNFCond functs)) []) ++
+  "\n" ++ showConditions fdecls funconds
+ where
+  specmname = callTypesModule mname
+
+  hasNoNFCond = (`notElem` (map fst funconds)) . fst
+
+  ct2fun ((_,fn), cts) =
+    cmtfunc
+      ("Required call type of operation `" ++ fn ++ "`:")
+      (specmname, encodeContractName $ fn ++ "'calltype") 0 Public
+      (emptyClassType stringType)
+      [simpleRule [] (string2ac (show cts))]
+
+------------------------------------------------------------------------------
 --- Transforms call types to an AbstractCurry module which can be read
 --- with `readCallTypeSpecMod`.
 callTypes2SpecMod :: String -> [(QName,[[CallType]])] -> CurryProg
