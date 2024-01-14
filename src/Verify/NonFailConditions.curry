@@ -8,7 +8,8 @@
 module Verify.NonFailConditions
  where
 
-import Data.List         ( (\\), find, isPrefixOf, isSuffixOf, nub, union )
+import Data.List         ( (\\), find, isPrefixOf, isSuffixOf, nub
+                         , splitOn, union )
 
 import Contract.Names    ( encodeContractName )
 import FlatCurry.Goodies
@@ -118,10 +119,26 @@ genNonFailFunction (Func (mn,fn) ar vis texp _) cnd =
                         then nfcondexp
                         else Free (nfcondvars \\ [1..ar]) nfcondexp))
  where
-  nfcondexp = updCombs transTester (simpExpr cnd)
+  nfcondexp = updCombs transClassImplOp (updCombs transTester (simpExpr cnd))
   nfcondvars = nub (allFreeVars nfcondexp)
 
-  -- transform test predicate
+  -- transform possible implementation of a class operation, e.g.,
+  -- `_impl#minBound#Prelude.Bounded#Prelude.Char` -> `minBound :: Char`
+  transClassImplOp ct qf@(mnf,fnf) args = case splitOn "#" fnf of
+    [impl,fname,_,types] | impl == "_impl"
+       -> maybe (Comb ct (mnf,fname) args)
+                (Typed (Comb ct (mnf,fname) args))
+                (typeString2TExp types)
+    _  -> Comb ct qf args
+   where
+    typeString2TExp s | s == "Prelude.Bool"      = Just fcBool
+                      | s == "Prelude.Char"      = Just fcChar
+                      | s == "Prelude.Int"       = Just fcInt
+                      | s == "Prelude.Float"     = Just fcFloat
+                      | s == "Prelude.Ordering"  = Just fcOrdering
+                      | otherwise                = Nothing
+
+  -- transform possible test predicate
   transTester ct qf@(mnt,fnt) args
     | mnt == "Prelude" && "is-" `isPrefixOf` fnt
     = if fnt == "is-nil"

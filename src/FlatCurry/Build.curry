@@ -22,6 +22,18 @@ fcBool = TCons (pre "Bool") []
 fcInt:: TypeExpr
 fcInt = TCons (pre "Int") []
 
+--- The FlatCurry type `Float`.
+fcFloat:: TypeExpr
+fcFloat = TCons (pre "Float") []
+
+--- The FlatCurry type `Char`.
+fcChar :: TypeExpr
+fcChar = TCons (pre "Char") []
+
+--- The FlatCurry type `Ordering`.
+fcOrdering :: TypeExpr
+fcOrdering = TCons (pre "Ordering") []
+
 --- Constructs a FlatCurry type list.
 fcList :: TypeExpr -> TypeExpr
 fcList te = TCons (pre "[]") [te]
