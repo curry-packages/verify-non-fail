@@ -1,5 +1,4 @@
 MODULE 'Fac' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-fac: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -8,7 +7,6 @@ fac'nonfail :: Int -> Bool
 fac'nonfail v1 = (v1 == 0) || (v1 > 0)
 
 MODULE 'UseFac' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-fac1: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -17,10 +15,6 @@ fac1'nonfail :: Int -> Int -> Bool
 fac1'nonfail v1 v2 = ((v2 + 5) == 0) || ((v2 + 5) > 0)
 
 MODULE 'FacMore' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-fac: <FAILING>
-fac5: <FAILING>
-facNeg: <FAILING>
-gt3: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -40,8 +34,15 @@ fac5'nonfail v1 v2 = ((v2 + 5) == 0) || ((v2 + 5) > 0)
 facNeg'nonfail :: Int -> Bool
 facNeg'nonfail v1 = (v1 > 0) || (v1 > 3)
 
+MODULE 'FacIO' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+
+NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
+
+-- Non-fail condition of operation `fac`:
+fac'nonfail :: Int -> Bool
+fac'nonfail v1 = (v1 == 0) || (v1 > 0)
+
 MODULE 'UseDiv' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-div1: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -54,7 +55,6 @@ MODULE 'Diamond' VERIFIED
 MODULE 'Sig' VERIFIED
 
 MODULE 'ListLength' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-f: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -63,7 +63,6 @@ f'nonfail :: [a] -> Bool
 f'nonfail v1 = (len v1) < 10
 
 MODULE 'Nth' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -72,7 +71,6 @@ nth'nonfail :: [a] -> Int -> Bool
 nth'nonfail v1 v2 = (v2 >= 0) && ((len (tak (v2 + 1) v1)) == (v2 + 1))
 
 MODULE 'NthInfer' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -85,7 +83,6 @@ nth'nonfail v1 v2 = ((not (null v1)) && (case v1 of
     _ -> True))
 
 MODULE 'NthZero' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -96,7 +93,6 @@ nth'nonfail v1 v2 = (not (null v1)) && (case v1 of
     _ -> True)
 
 MODULE 'NthZeroNonFail' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-nth: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -108,7 +104,6 @@ MODULE 'NthZeroNonFailWrong' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 nth: <FAILING>
 
 MODULE 'One' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-one: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -117,7 +112,6 @@ one'nonfail :: Int -> Bool
 one'nonfail v1 = v1 == 0
 
 MODULE 'HeadPos' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-headpos: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -128,7 +122,6 @@ headpos'nonfail v1 = (not (null v1)) && (case v1 of
     _ -> True)
 
 MODULE 'CharBounds' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
-succChar: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 

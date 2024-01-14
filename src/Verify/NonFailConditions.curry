@@ -141,10 +141,10 @@ allFreeVars :: Expr -> [Int]
 allFreeVars e = trExpr (:) (const id) comb lt fr (.) cas branch const e []
  where
   comb _ _ = foldr (.) id
-  lt bs exp = (\\(map fst bs)) . exp . foldr (.) id (map snd bs)
-  fr vs exp = (\\vs) . exp
+  lt bs exp = (filter (`notElem` (map fst bs))) . exp . foldr (.) id (map snd bs)
+  fr vs exp = (filter (`notElem` vs)) . exp
   cas _ exp bs = exp . foldr (.) id bs
-  branch pat exp = (\\(args pat)) . exp
+  branch pat exp = (filter (`notElem` (args pat))) . exp
   args pat | isConsPattern pat = patArgs pat
            | otherwise = []
 

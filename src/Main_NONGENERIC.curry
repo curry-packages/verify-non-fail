@@ -338,11 +338,13 @@ printVerifyResult opts vst mname isvisible = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
                             (Map.toList (vstCallTypes vst))
+      funconds = vstFunConds vst
   if null calltypes
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
-           : showFunResults prettyFunCallAType (sortFunResults calltypes)
-  let funconds = vstFunConds vst
+           : showFunResults prettyFunCallAType
+               (sortFunResults (filter ((`notElem` (map fst funconds)) . fst)
+                                       calltypes))
   fdecls <- currentFuncDecls vst
   unless (null funconds) $
     putStrLn $ "NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:\n" ++
@@ -949,9 +951,8 @@ verifyFuncCall exp qf vs = do
   opts <- fmap vstToolOpts get
   if qf == pre "failed" || (optError opts && qf == pre "error")
     then do
-      unsat  <- if optSMT opts then do bcond  <- getExpandedCondition
-                                       isUnsatisfiable bcond
-                               else return False
+      bcond  <- getExpandedCondition
+      unsat  <- isUnsatisfiable bcond
       if unsat
         then do currfn <- getCurrentFuncName
                 printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": CALL TO " ++
@@ -1000,14 +1001,10 @@ verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
          -- call type of this function and analyze it again.
          do printIfVerb 2 "UNSATISFIED ABSTRACT CALL TYPE\n"
             maybe
-              (do implied <- if optSMT (vstToolOpts st)
-                               then do
-                                 -- check whether the negated call condition is
-                                 -- unsatisfiable (if yes: call condition holds)
-                                 implcond <- getExpandedConditionWithConj
-                                               (fcNot callcond)
-                                 isUnsatisfiable implcond
-                               else return False
+              (do -- check whether the negated call condition is unsatisfiable
+                  -- (if yes: call condition holds)
+                  implcond <- getExpandedConditionWithConj (fcNot callcond)
+                  implied  <- isUnsatisfiable implcond
                   if implied
                     then printIfVerb 2 "CALL CONDITION SATISFIED\n"
                     else addFailedFunc exp Nothing callcond)
@@ -1105,12 +1102,10 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
  where
   -- check whether a constructor is excluded by the current call condition:
   checkMissCons cs = do
-    opts  <- getToolOptions
     printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
     let iscons = Comb FuncCall (pre $ "is-" ++ transOpName cs) [Var casevar]
-    unsat <- if optSMT opts then do bcond  <- getExpandedCondition
-                                    isUnsatisfiable (fcAnd iscons bcond)
-                             else return False
+    bcond <- getExpandedCondition
+    unsat <- isUnsatisfiable (fcAnd iscons bcond)
     return $ if unsat then [] else [cs]
 
 -- Gets the state information which might be changed during branch verification.
@@ -1173,6 +1168,12 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
     | qc == pre ":"
     = case pt of TCons tc [et] | tc == pre "[]" -> [et, pt]
                  _                              -> repeat unknownType
+    | qc == pre "(,)"
+    = case pt of TCons tc [t1,t2] | tc == pre "(,)" -> [t1,t2]
+                 _                                  -> repeat unknownType
+    | qc == pre "Just"
+    = case pt of TCons tc [t] | tc == pre "Maybe" -> [t]
+                 _                                -> repeat unknownType
     | otherwise
     = error $
         "verifyBranch: cannot compute pattern argument types for " ++ snd qc
@@ -1238,17 +1239,20 @@ showSimpExp = showExp . simpExpr
 --- of variables (second argument) with an SMT solver.
 isUnsatisfiable :: Expr -> VerifyStateM Bool
 isUnsatisfiable bexp = do
-  vts <- fmap (map (\(v,te,_) -> (v,te))) getVarExps
   st <- get
-  let allvs    = allFreeVars bexp
-      vtypes   = filter ((`elem` allvs) . fst) vts
-      question = "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE? "
-  fname  <- getCurrentFuncName
-  unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
-    "WARNING in operation '" ++ snd fname ++
-    "': missing variables in unsatisfiability check!"
-  answer <- lift $ checkUnsatisfiabilityWithSMT (vstToolOpts st) fname question
-                                                (vstModules st) vtypes bexp
-  return (maybe False id answer)
+  if optSMT (vstToolOpts st)
+    then do
+      vts <- fmap (map (\(v,te,_) -> (v,te))) getVarExps
+      let allvs    = allFreeVars bexp
+      let vtypes   = filter ((`elem` allvs) . fst) vts
+          question = "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE?"
+      fname  <- getCurrentFuncName
+      unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
+        "WARNING in operation '" ++ snd fname ++
+        "': missing variables in unsatisfiability check!"
+      answer <- lift $ checkUnsatisfiabilityWithSMT (vstToolOpts st)
+                         fname question (vstModules st) vtypes bexp
+      return (maybe False id answer)
+    else return False
 
 ------------------------------------------------------------------------------

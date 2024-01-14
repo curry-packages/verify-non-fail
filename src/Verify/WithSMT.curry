@@ -54,9 +54,6 @@ checkUnsatWithSMT :: Options -> QName -> String -> IORef [Prog]
                   -> [(Int,TypeExpr)] -> Term -> IO (Maybe Bool)
 checkUnsatWithSMT opts qf title modsref vartypes assertion =
   flip catch (\e -> print e >> return Nothing) $ do
-  let (pretypes,_ {-usertypes-}) =
-         partition ((== "Prelude") . fst)
-                   (foldr union [] (map (tconsOfTypeExpr . snd) vartypes))
   let allsyms = catMaybes
                   (map (\n -> maybe Nothing Just (untransOpName n))
                        (map qidName (allQIdsOfTerm assertion)))
@@ -69,6 +66,10 @@ checkUnsatWithSMT opts qf title modsref vartypes assertion =
                        (\fds -> addSortsInCmd fdecls [] (DefineSigsRec fds))
                        (mapM fun2SMT fdecls)
   --putStrLn $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
+  let vartypestcons = foldr union [] (map (tconsOfTypeExpr . snd) vartypes)
+      funcstcons    = foldr union [] (map (tconsOfTypeExpr . funcType) fdecls)
+      (pretypes,_ {-usertypes-}) =
+         partition ((== "Prelude") . fst) (union funcstcons vartypestcons)
   let --decls = map (maybe (error "Internal error: some datatype not found!") id)
       --            [] --(map (tdeclOf vst) usertypes)
       -- substitute type parameters in variables by `TVar`:
@@ -214,6 +215,8 @@ addSortsInTerm fdecls vsorts term = fst (addSort vsorts term)
   simpleConsTypes = -- TODO: GENERALIZE!
     [ ("insert", ([SComb "TVar1" [], SComb "List" [SComb "TVar1" []]],
                    SComb "List" [SComb "TVar1" []]))
+    , ("mk-pair", ([SComb "TVar1" [], SComb "TVar2" []],
+                   SComb "Pair" [SComb "TVar1" [], SComb "TVar2" []]))
     ]
   
   qidSort (As _ s) = s
@@ -231,9 +234,10 @@ addSortsInTerm fdecls vsorts term = fst (addSort vsorts term)
                         (find ((== qf) . funcName) fdecls))
           (untransOpName n)
   
-  transSimpleID n =
+  transSimpleID n = -- TODO: extend to all relevant operations
     maybe (if n `elem` [ "and", "or", "not", "=", "/=", "<", ">", "<=", ">="
-                       , "true", "false", "unit", "nil", "insert" ] ||
+                       , "true", "false", "unit", "nil", "insert", "mk-pair"
+                       , "Nothing", "Just"] ||
               "is-" `isPrefixOf` n
              then Id n
              else trace ("\nSIMPLE OPERATION " ++ n ++ " NOT FOUND!") $ Id n)
