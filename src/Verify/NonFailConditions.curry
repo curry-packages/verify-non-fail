@@ -10,6 +10,7 @@ module Verify.NonFailConditions
 
 import Data.List         ( (\\), find, isPrefixOf, isSuffixOf, nub, union )
 
+import Contract.Names    ( encodeContractName )
 import FlatCurry.Goodies
 import FlatCurry.Types
 
@@ -111,7 +112,8 @@ showConditions fdecls = unlines . map showCond
 --- function and non-fail condition.
 genNonFailFunction :: FuncDecl -> Expr -> FuncDecl
 genNonFailFunction (Func (mn,fn) ar vis texp _) cnd =
-  Func (mn, fn ++ nonfailSuffix) ar vis (nftype [1..ar] texp)
+  Func (mn, encodeContractName $ fn ++ nonfailSuffix) ar vis
+       (nftype [1..ar] texp)
        (Rule [1..ar] (if all (`elem` [1..ar]) nfcondvars
                         then nfcondexp
                         else Free (nfcondvars \\ [1..ar]) nfcondexp))
