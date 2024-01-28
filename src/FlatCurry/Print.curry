@@ -12,6 +12,10 @@ import FlatCurry.Pretty as FCP
 import FlatCurry.Types
 import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
 
+--- Shows a pretty-printed FlatCurry program.
+showFlatProg :: Prog -> String
+showFlatProg = pPrint . ppProg defaultOptions { qualMode = QualNone}
+
 --- Shows a pretty-printed FlatCurry expression.
 showTypeExp :: TypeExpr -> String
 showTypeExp = pPrint . ppTypeExp

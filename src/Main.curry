@@ -332,7 +332,7 @@ printVerifyResult opts vst mname isvisible = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
   let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
                             (Map.toList (vstCallTypes vst))
-      funconds = vstFunConds vst
+      funconds = filter (showFun . fst) (vstFunConds vst)
   if null calltypes
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
@@ -1143,10 +1143,8 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
       branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar pattype vts)
       casevartype    = getVarType casevar branchvartypes
   -- add single case for case variable and pattern to the current condition:
-  if null vs
-    then addEquVarCondition casevar (Comb ConsCall qc (map Var vs))
-    else do
-      addSingleCase casevar qc vs
+  if null vs then addEquVarCondition casevar (Comb ConsCall qc [])
+             else addSingleCase casevar qc vs
   printIfVerb 3 $ "BRANCH WITH CONSTRUCTOR " ++ snd qc
   showVarExpTypes
   if isEmptyType casevartype

@@ -402,7 +402,7 @@ writeSpecModule opts mname fdecls pubntcalltypes funconds = do
   let ctmname = callTypesModule mname
       ctfile  = ctmname ++ ".curry"
   exct <- doesFileExist ctfile
-  if null pubntcalltypes
+  if null pubntcalltypes && null funconds
     then when exct $ removeFile ctfile
     else do
       oldctmod <- if exct then readCompleteFile ctfile else return ""

@@ -70,6 +70,8 @@ simpExpr exp = case exp of
    -- simplify equality instance on lists:
    | ct == FuncCall && qf == pre "_impl#==#Prelude.Eq#[]"
    = Comb ct (pre "==") (tail args)
+   | ct == FuncCall && qf == pre "_impl#===#Prelude.Data#[]"
+   = Comb ct (pre "===") (tail args)
    -- simplify equal class calls:
    | otherwise
    = moreSimpComb (Comb ct qf args)
