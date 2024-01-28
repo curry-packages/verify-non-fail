@@ -4,10 +4,10 @@
 --- 
 --- The tool caches already computed analysis results about modules
 --- under the directory defined in `getVerifyCacheDirectory` which
---- is usually `~/.curry_verifycache/...`.
+--- is usually `~/.curry_verifycache/<CURRYSYSTEM>/...`.
 ---
 --- @author Michael Hanus
---- @version December 2023
+--- @version January 2024
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -52,14 +52,14 @@ import Verify.Options
 -- Definition of directory and file names for various data.
 
 -- Cache directory where data files generated and used by this tool are stored.
--- If $HOME exists, it is `~/.curryverify_cache/<CURRYSYSTEM>`.
+-- If $HOME exists, it is `~/.curry_verifycache/<CURRYSYSTEM>/<DOMAINID>`.
 getVerifyCacheDirectory :: String -> IO String
 getVerifyCacheDirectory domainid = do
   homedir    <- getHomeDirectory
   hashomedir <- doesDirectoryExist homedir
   let maindir = if hashomedir then homedir else installDir
-  return $ maindir </> ".curry_verifycache" </> domainid </>
-           joinPath (tail (splitDirectories currySubdir))
+  return $ maindir </> ".curry_verifycache" </>
+           joinPath (tail (splitDirectories currySubdir)) </> domainid
 
 --- Delete the tool's cache directory (for the Curry system).
 deleteVerifyCacheDirectory :: Options -> IO ()
@@ -68,7 +68,7 @@ deleteVerifyCacheDirectory opts = do
   exists   <- doesDirectoryExist cachedir
   when exists $ do
     printWhenStatus opts $ "Deleting directory '" ++ cachedir ++ "''..."
-    system ("rm -Rf " ++ quote cachedir)
+    system $ "rm -Rf " ++ quote cachedir
     return ()
  where
   quote s = "\"" ++ s ++ "\""

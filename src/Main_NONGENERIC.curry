@@ -66,7 +66,7 @@ import FlatCurry.Simplify         ( simpExpr )
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 13/01/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 28/01/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
