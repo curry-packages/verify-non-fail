@@ -2,7 +2,7 @@
 --- Operations to show and store statistical information about the analysis.
 ---
 --- @author Michael Hanus
---- @version October 2023
+--- @version February 2024
 -----------------------------------------------------------------------------
 
 module Verify.Statistics ( showStatistics, storeStatistics )
@@ -29,12 +29,12 @@ statsFile mname = mname ++ "-STATISTICS"
 -- Show statistics in textual and in CSV format:
 showStatistics :: TermDomain a => Options -> Int -> Int -> (QName -> Bool)
                -> Int -> Int -> (Int,Int)
-               -> (Int,Int) -> [(QName, ACallType a)]
+               -> (Int,Int) -> [(QName, ACallType a)] -> [QName]
                -> (Int,Int) -> (String, [String])
 showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
                (numpubiotypes, numalliotypes)
                (numpubcalltypes, numallcalltypes)
-               ntfinalcts (numcalls, numcases) =
+               ntfinalcts withnonfailconds (numcalls, numcases) =
   ( unlines $
       [ "Functions                      (public / all): " ++
         show numvisfuncs ++ " / " ++ show numallfuncs
@@ -44,9 +44,11 @@ showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
         show numpubcalltypes ++ " / " ++ show numallcalltypes ] ++
       (if optVerify opts
          then [ "Final non-trivial call types   (public / all): " ++
-                show numntfinalpubcts ++ " / " ++ show numntfinalcts
+                show numpubntfinalcts ++ " / " ++ show numallntfinalcts
+              , "Final non-fail conditions      (public / all): " ++
+                show numpubnfconds ++ " / " ++ show numallnfconds
               , "Final failing call types       (public / all): " ++
-                show numfailpubcts ++ " / " ++ show numfailcts
+                show numfailpubcts ++ " / " ++ show numfailallcts
               , "Non-trivial function calls checked           : " ++
                 show numcalls
               , "Incomplete case expressions checked          : " ++
@@ -58,16 +60,21 @@ showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
          else [])
   , map show [ numvisfuncs, numallfuncs, numpubiotypes, numalliotypes
              , numpubcalltypes, numallcalltypes
-             , numntfinalpubcts, numntfinalcts
-             , numfailpubcts, numfailcts
+             , numpubntfinalcts, numallntfinalcts
+             , numpubnfconds, numallnfconds
+             , numfailpubcts, numfailallcts
              , numcalls, numcases, numits, vtime ]
   )
  where
   ntfinalpubcts    = filter (isvisible . fst) ntfinalcts
-  numntfinalpubcts = length ntfinalpubcts
-  numntfinalcts    = length ntfinalcts
+  numallntfinalcts = length ntfinalcts - numallnfconds
+  numpubntfinalcts = length ntfinalpubcts - numpubnfconds
+  numallnfconds    = length withnonfailconds
+  numpubnfconds    = length (filter isvisible withnonfailconds)
+  numfailallcts    = length (filter (isFailACallType . snd) ntfinalcts)
+                     - numallnfconds
   numfailpubcts    = length (filter (isFailACallType . snd) ntfinalpubcts)
-  numfailcts       = length (filter (isFailACallType . snd) ntfinalcts)
+                     - numpubnfconds
 
 --- Store the statitics for a module in a text and a CSV file
 --- (if required by the current options).

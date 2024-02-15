@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version January 2024
+--- @version February 2024
 -------------------------------------------------------------------------
 
 module Main where
@@ -61,7 +61,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 28/01/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 15/02/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -167,7 +167,8 @@ verifyModule valueanalysis astore opts0 mname = do
                             numvisfuncs numfdecls
                             (numpubntiotypes, numntiotypes)
                             (numpubacalltypes, numntacalltypes)
-                            finalntacalltypes (vstStats vst)
+                            finalntacalltypes
+                            (map fst (vstFunConds vst)) (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when (optVerify opts) $ do
     storeTypes opts mname fdecls modcons finalacalltypes
@@ -367,7 +368,10 @@ showIncompleteBranch qf e [] =
 -- * a fresh variable index
 -- * a list of all variables and their bound expressions
 -- * a list of all variables and their input/output types
--- * the call types of all operations
+-- * the call condition of the current branch expressed as a (Boolean) FlatCurry
+--   expression which contains a "hole" to extend it with further conjunctions
+-- * the call types of all imported operations
+-- * the call types of operations of the current module
 -- * the input/output types of all operations
 -- * the list of failed function calls
 -- * the list of incomplete case expressions
@@ -669,15 +673,15 @@ getExpandedConditionWithConj conj = do
 
 -- Sets the current branch condition in internal representation.
 setCondition :: TermDomain a => (Expr -> Expr) -> VerifyStateM a ()
-setCondition exps = do
+setCondition expf = do
   st <- get
-  put $ st { vstCondition = exps }
+  put $ st { vstCondition = expf }
 
 -- Sets the initial condition for a function call.
 setCallCondition :: TermDomain a => Expr -> VerifyStateM a ()
-setCallCondition exps = do
+setCallCondition exp = do
   st <- get
-  put $ st { vstCondition = fcAnd exps }
+  put $ st { vstCondition = fcAnd exp }
 
 -- Adds a conjunct to the current condition.
 addConjunct :: TermDomain a => Expr -> VerifyStateM a ()
@@ -685,8 +689,11 @@ addConjunct exp = do
   st <- get
   put $ st { vstCondition = \c -> (vstCondition st) (fcAnd exp c) }
 
--- Adds a case expression where all alternative branches are false
--- to the current condition.
+-- Adds to the current condition an equality between a variable and
+-- a constructor applied to a list of fresh pattern variables.
+-- This condition is expressed as a case expression where
+-- the hole of the current condition is in the branch for the given
+-- constructor and all alternative branches return a `False` value.
 addSingleCase :: TermDomain a => Int -> QName -> [Int] -> VerifyStateM a ()
 addSingleCase casevar qc branchvars = do
   st <- get
@@ -1125,7 +1132,7 @@ verifyBranch casevar ve (Branch (LPattern l) e) = do
   bstate <- getBranchState
   vts  <- getVarTypes
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
-  printIfVerb 3 $ "BRANCH WITH LITERAL " ++ show l
+  printIfVerb 3 $ "BRANCH WITH LITERAL '" ++ show l ++ "'"
   addEquVarCondition casevar (Lit l)
   if isEmptyType (getVarType casevar branchvartypes)
     then return [] -- unreachable branch
@@ -1145,7 +1152,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   -- add single case for case variable and pattern to the current condition:
   if null vs then addEquVarCondition casevar (Comb ConsCall qc [])
              else addSingleCase casevar qc vs
-  printIfVerb 3 $ "BRANCH WITH CONSTRUCTOR " ++ snd qc
+  printIfVerb 3 $ "BRANCH WITH CONSTRUCTOR '" ++ snd qc ++ "'"
   showVarExpTypes
   if isEmptyType casevartype
     then do restoreBranchState bstate
