@@ -1,9 +1,9 @@
 {
-    "name": "verify-non-failing",
-    "version": "0.0.1",
+    "name": "verify-non-fail",
+    "version": "1.0.0",
     "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
-    "synopsis": "A tool to verify totality of Curry operations",
-    "category": [ "Programming" ],
+    "synopsis": "A tool to verify Curry operations as non-failing",
+    "category": [ "Programming", "Analysis", "Verification" ],
     "license": "BSD-3-Clause",
     "licenseFile": "LICENSE",
     "dependencies": {
@@ -32,6 +32,9 @@
         "name"   : "curry-calltypes",
         "main"   : "Main",
         "options": { "kics2" : ":set rts -T" }
+    },
+    "source": {
+        "git": "https://github.com/curry-packages/verify-non-fail.git",
+        "tag": "$version"
     }
-
 }
