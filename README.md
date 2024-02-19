@@ -59,6 +59,38 @@ M. Hanus: Inferring Non-Failure Conditions for Declarative Programs,
 Proc. of the 17th International Symposium on Functional and Logic Programming
 (FLOPS 2024), to appear in Springer LNCS, 2024
 
+
+Arithmetic non-fail conditions (experimental extension!)
+--------------------------------------------------------
+
+If the SMT solver [Z3](https://github.com/Z3Prover/z3.git) is
+installed and the executable `z3` can be found in the path,
+the tool can also infer and verify arithmetic non-fail conditions.
+For instance, it infers for the factorial function defined by
+
+    fac :: Int -> Int
+    fac n | n == 0 = 1
+          | n > 0  = n * fac (n - 1)
+
+the non-fail condition
+
+    fac'nonfail :: Int -> Bool
+    fac'nonfail v1 = (v1 == 0) || (v1 > 0)
+
+specifying that the argument must be non-negative in order to ensure
+that `fac` does not fail.
+With this information, it also proves that the following
+I/O operation does not fail (where the operation `readInt`
+reads a line until it is an integer):
+
+    printFac :: IO ()
+    printFac = do
+      putStr "Factorial computation for: "
+      n <- readInt
+      if n<0 then putStrLn "Negative number, try again" >> printFac
+             else print (fac n)
+
+
 ------------------------------------------------------------------------------
 
 Installation:
