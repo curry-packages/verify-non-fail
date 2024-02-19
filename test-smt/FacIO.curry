@@ -7,15 +7,11 @@ fac n | n == 0 = 1
 facIO :: IO ()
 facIO = do
   putStr "Input some non-negative integer: "
-  s <- getLine
-  case readInt s of
-    --[(n,_)] -> if n >= 0 then print (fac n) else facIO
-    Just n   -> if n >= 0 then print (fac n) else facIO
-    _       -> facIO
+  mbn <- fmap readInt getLine
+  case mbn of Just n | n >= 0 -> print (fac n)
+              _               -> facIO
 
--- Dummy definition:
-reads :: String -> [(Int,String)]
-reads _ = [(0,"")]
-
+-- Reads an integer from a string.
 readInt :: String -> Maybe Int
-readInt _ = Just 10
+readInt s = case reads s of [(n,"")] -> Just n
+                            _        -> Nothing
