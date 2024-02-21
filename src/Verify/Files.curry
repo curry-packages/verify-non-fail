@@ -264,7 +264,7 @@ readCallTypeFile opts mtimesrc mname = do
 --- given module if it is up-to-date (where the modification time
 --- of the module is passed as the second argument).
 readNonFailCondFile :: Options -> ClockTime -> String
-                    -> IO [(QName,NonFailCond)]
+                    -> IO (Maybe [(QName,NonFailCond)])
 readNonFailCondFile opts mtimesrc mname = do
   fname <- getNonFailCondFile opts mname
   existsf <- doesFileExist fname
@@ -277,9 +277,9 @@ readNonFailCondFile opts mtimesrc mname = do
             "Reading previously inferred non-fail conditions from '" ++
             fname ++ "'..."
           cts <- readFile fname >>= return . map read . lines
-          return $ map (\ (fn,ct) -> ((mname,fn), ct)) cts
-        else return []
-    else return []
+          return $ Just $ map (\ (fn,ct) -> ((mname,fn), ct)) cts
+        else return Nothing
+    else return Nothing
 
 ------------------------------------------------------------------------------
 --- Reads the public non-trivial call types (which have been already

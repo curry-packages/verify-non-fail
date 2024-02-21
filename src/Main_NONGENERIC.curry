@@ -20,6 +20,7 @@ import Curry.Compiler.Distribution ( curryCompiler )
 import Data.Char                   ( toLower )
 import Data.IORef
 import Data.List
+import Data.Maybe                  ( isNothing )
 import System.Environment          ( getArgs )
 
 import Debug.Trace ( trace )
@@ -131,20 +132,21 @@ verifyModule valueanalysis astore opts0 mname = do
       allcons = modcons ++ impconss
   mtime <- getModuleModTime mname
   -- infer initial abstract call types:
+  mboldacalltypes <- readCallTypeFile opts mtime mname
   (acalltypes, numntacalltypes, numpubacalltypes) <- id $!!  
-    inferCallTypes opts allcons isVisible mname mtime flatprog
+    inferCallTypes opts allcons isVisible mname mtime flatprog mboldacalltypes
   -- infer in/out types:
   (iotypes, numntiotypes, numpubntiotypes) <- id $!!
     inferIOTypes opts valueanalysis astore isVisible flatprog
   -- read previously inferred non-fail conditions:
-  nfconds <- readNonFailCondFile opts mtime mname
+  mbnfconds <- readNonFailCondFile opts mtime mname
 
   vstate <- initVerifyState flatprog allcons
                             (Map.fromList impacalltypes)
                             (Map.fromList impnftypes)
                             (Map.fromList acalltypes)
                             (Map.fromList (iotypes ++ impiotypes))
-                            nfconds opts
+                            (maybe [] id mbnfconds) opts
   let funusage = funcDecls2Usage mname fdecls
   enforceNormalForm opts "VERIFYSTATE" vstate
   printWhenAll opts $ unlines $
@@ -152,8 +154,11 @@ verifyModule valueanalysis astore opts0 mname = do
     map (\ (qf, qfs) -> snd qf ++ ": used in " ++
                         unwords (map (snd . funcName) qfs))
         (Map.toList funusage)
+  let withverify = optVerify opts &&
+                   (null (optFunction opts) ||
+                    isNothing mbnfconds || isNothing mboldacalltypes)
   (vnumits, vtime, vst) <-
-   if optVerify opts
+   if withverify
      then do
        printWhenStatus opts $ "Start verification of '" ++ mname ++ "' (" ++
          show numfdecls ++ " functions):"
@@ -177,7 +182,7 @@ verifyModule valueanalysis astore opts0 mname = do
                             finalntacalltypes
                             (map fst (vstFunConds vst)) (vstStats vst)
   when (optStats opts) $ putStr stattxt
-  when (optVerify opts) $ do
+  when withverify $ do
     storeTypes opts mname fdecls modcons finalacalltypes
       (filter (isVisible .fst) finalntacalltypes) (vstFunConds vst) iotypes
     storeStatistics opts mname stattxt statcsv
@@ -185,10 +190,12 @@ verifyModule valueanalysis astore opts0 mname = do
 
 --- Infer the initial (abstract) call types of all functions in a program and
 --- return them together with the number of all/public non-trivial call types.
+--- The last argument are the already stored old call types, if they are
+--- up to date.
 inferCallTypes :: Options -> [[(QName,Int)]] -> (QName -> Bool)
-               -> String -> ClockTime -> Prog
+               -> String -> ClockTime -> Prog -> Maybe [(QName,ACallType)]
                -> IO ([(QName, ACallType)], Int, Int)
-inferCallTypes opts allcons isVisible mname mtime flatprog = do
+inferCallTypes opts allcons isVisible mname mtime flatprog mboldacalltypes = do
   oldpubcalltypes <- readPublicCallTypeModule opts allcons mtime mname
   let fdecls       = progFuncs flatprog
   let calltypes    = unionBy (\x y -> fst x == fst y) oldpubcalltypes
@@ -205,7 +212,6 @@ inferCallTypes opts allcons isVisible mname mtime flatprog = do
         showFunResults prettyFunCallTypes
          (sortFunResults (if optPublic opts then pubcalltypes else ntcalltypes))
 
-  mboldacalltypes <- readCallTypeFile opts mtime mname
   let pubmodacalltypes = map (funcCallType2AType allcons) oldpubcalltypes
       acalltypes = unionBy (\x y -> fst x == fst y) pubmodacalltypes
                            (maybe (map (funcCallType2AType allcons) calltypes)
@@ -255,11 +261,14 @@ showFunctionInfo opts mname vst = do
   if qf `notElem` map funcName fdecls
     then putStrLn $ "Function '" ++ snd qf ++ "' not defined!"
     else do
-      let ctype = maybe (Just [anyType]) id (Map.lookup qf (vstCallTypes vst))
-          iot   = maybe (trivialInOutType 0) id (Map.lookup qf (vstIOTypes vst))
+      let iot   = maybe (trivialInOutType 0) id (Map.lookup qf (vstIOTypes vst))
+          ctype = maybe (Just [anyType]) id (Map.lookup qf (vstCallTypes vst))
       putStrLn $ "Function '" ++ f ++ "':"
-      putStrLn $ "Call type  : " ++ prettyFunCallAType ctype
       putStrLn $ "In/out type: " ++ showIOT iot
+      putStrLn $ "Call type  : " ++ prettyFunCallAType ctype
+      maybe (return ())
+            (\nfc -> putStrLn $ showConditions fdecls [(qf,nfc)])
+            (lookup qf (vstFunConds vst))
 
 -- Try to verify a module, possibly in several iterations.
 -- The second argument is the number of already performed iterations,

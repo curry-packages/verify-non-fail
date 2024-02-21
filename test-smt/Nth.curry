@@ -14,6 +14,8 @@ nth (x:xs) n | n == 0 = x
 
 nth'nonfail :: [a] -> Int -> Bool
 nth'nonfail xs n = n >= 0 && len (tak (n+1) xs) == n+1
+-- Alternative non-fail condition, works only for finite lists:
+--nth'nonfail xs n = n >= 0 && len xs > n
 
 {-
 
