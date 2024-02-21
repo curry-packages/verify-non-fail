@@ -41,6 +41,7 @@ import System.Directory           ( createDirectoryIfMissing, doesFileExist
 import System.FilePath            ( (</>) )
 import System.IO                  ( hFlush, stdout )
 import System.Path                ( fileInPath )
+import System.Process             ( exitWith )
 
 -- Imports from package modules:
 import FlatCurry.Build            ( pre )
@@ -76,7 +77,10 @@ main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
                else opts0
   when (optDeleteCache opts0) $ deleteVerifyCacheDirectory opts0
   case progs of
-    [] -> unless (optDeleteCache opts0) $ error "Module name missing"
+    [] -> unless (optDeleteCache opts0) $ do
+            putStrLn "Module name missing!"
+            putStrLn "Try option '--help' for usage information."
+            exitWith 1
     ms -> do
       if optDomainID opts == analysisName resultValueAnalysisTop
         then runWith resultValueAnalysisTop opts ms

@@ -86,7 +86,10 @@ main = do
     else do
       when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts
       case progs of
-        [] -> unless (optDeleteCache opts) $ error "Module name missing"
+        [] -> unless (optDeleteCache opts) $ do
+                putStrLn "Module name missing!"
+                putStrLn "Try option '--help' for usage information."
+                exitWith 1
         ms -> runWith valueAnalysis opts ms
  where
   runWith analysis opts ms = do
