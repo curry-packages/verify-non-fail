@@ -6,5 +6,5 @@ f :: [a] -> [a]
 f xs | len xs < 10 = xs
 
 --usef x = f [x] -- polymorphic
-usef x = [1::Int]
+usef x = f [1::Int]
 --usef = f "abc"

@@ -16,6 +16,7 @@ import Numeric           ( readHex )
 import System.CPUTime    ( getCPUTime )
 import Debug.Trace
 
+import FlatCurry.AddTypes
 import FlatCurry.Build
 import FlatCurry.Files   ( readFlatCurry )
 import FlatCurry.Goodies
@@ -25,11 +26,12 @@ import FlatCurry.Simplify
 import FlatCurry.Types as FC
 import System.FilePath    ( (</>) )
 import System.IOExts      ( evalCmd )
-import Text.Pretty        ( pPrint, pretty )
+import Text.Pretty        ( pPrint, pretty, text )
 
 import Verify.ESMT as SMT
 import Verify.Helpers
 import Verify.Options
+import Verify.ProgInfo
 import PackageConfig      ( getPackagePath )
 
 ------------------------------------------------------------------------------
@@ -37,34 +39,60 @@ import PackageConfig      ( getPackagePath )
 -- property (represented as FlatCurry expressions).
 -- If the implication is `False`, the unsatisfiability of the assertion
 -- is checked.
-checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef [Prog]
+checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef ProgInfo
                              -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
-checkUnsatisfiabilityWithSMT opts qf scripttitle modsref vartypes assertionexp =
+checkUnsatisfiabilityWithSMT opts qf scripttitle pistore
+                             vartypes assertionexp = do
+  let qns = filter (/= anonCons) (allQNamesInExp assertionexp)
+  --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
+  --putStrLn $ "NAMES IN ASSERTION: " ++ show qns
+  loadModulesForQNames opts pistore qns
+  pinfos <- fmap progInfos $ readIORef pistore
+  let typedexp = addTypes2VarExp pinfos vartypes assertionexp fcBool
+  --putStrLn $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedexp
   maybe
-    (transExpError assertionexp)
+    (transExpError typedexp)
     (\assertion ->
-       catch (checkUnsatWithSMT opts qf scripttitle modsref vartypes assertion)
+       catch (checkUnsatWithSMT opts qf scripttitle pistore vartypes assertion)
              (\e -> print e >> return Nothing))
-    (exp2SMT Nothing (simpExpr assertionexp))
+    (exp2SMT Nothing (simpExpr typedexp))
  where
   transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
 
-checkUnsatWithSMT :: Options -> QName -> String -> IORef [Prog]
+-- Get all qualified names occurring in an expression.
+allQNamesInExp :: Expr -> [QName]
+allQNamesInExp e =
+  trExpr (const id) (const id) comb lt fr (.) cas branch const e []
+ where
+  comb _ qn exp = (qn:) . foldr (.) id exp
+  lt bs exp = exp . foldr (.) id (map snd bs)
+  fr _ exp = exp
+  cas _ exp bs = exp . foldr (.) id bs
+  branch pat exp = ((args pat)++) . exp
+  args (Pattern qc _) = [qc]
+  args (LPattern _)   = []
+
+
+checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
                   -> [(Int,TypeExpr)] -> Term -> IO (Maybe Bool)
-checkUnsatWithSMT opts qf title modsref vartypes assertion =
+checkUnsatWithSMT opts qf title pistore vartypes assertion =
   flip catch (\e -> print e >> return Nothing) $ do
-  let allsyms = catMaybes
-                  (map (\n -> maybe Nothing Just (untransOpName n))
-                       (map qidName (allQIdsOfTerm assertion)))
+  let allsyms = nub (catMaybes
+                       (map (\n -> maybe Nothing Just (untransOpName n))
+                            (map qidName (allQIdsOfTerm assertion))))
   unless (null allsyms) $ printWhenDetails opts $
     "Translating operations into SMT: " ++ unwords (map showQName allsyms)
-  fdecls <- getAllFunctions opts modsref (nub allsyms)
+  fdecls0 <- getAllFunctions opts pistore allsyms
+  pinfos <- fmap progInfos $ readIORef pistore
+  let fdecls = addTypes2FuncDecls pinfos fdecls0
+  --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
   --smtfuncs <- funcs2SMT opts modsref allsyms
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
                                   show (map funcName fdecls))
-                       (\fds -> addSortsInCmd fdecls [] (DefineSigsRec fds))
+                       (\fds -> DefineSigsRec fds)
                        (mapM fun2SMT fdecls)
+      fdecltvars = nub (concatMap allTVarsInFuncDecl fdecls)
   --putStrLn $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
   let vartypestcons = foldr union [] (map (tconsOfTypeExpr . snd) vartypes)
       funcstcons    = foldr union [] (map (tconsOfTypeExpr . funcType) fdecls)
@@ -72,25 +100,26 @@ checkUnsatWithSMT opts qf title modsref vartypes assertion =
          partition ((== "Prelude") . fst) (union funcstcons vartypestcons)
   let --decls = map (maybe (error "Internal error: some datatype not found!") id)
       --            [] --(map (tdeclOf vst) usertypes)
-      -- substitute type parameters in variables by `TVar`:
+      -- collect of type parameters in order to delcare them as sorts:
       tvarsInVars = foldr union []
-                      (map (typeParamsOfSort . type2sort . snd) vartypes)
-      tsubst = makeTPSubst (map (\n -> (n, SComb "TVar" [])) tvarsInVars)
-      varsorts = map (\(i,te) -> (i, substSort tsubst (type2sort te))) vartypes
-      tassertion = addSortsInTerm fdecls varsorts assertion
-  --putStrLn $ "Assertion: " ++ pPrint (pretty tassertion)
+                          (map (typeParamsOfSort . type2sort)
+                          (map snd vartypes ++ map TVar fdecltvars))
+      varsorts = map (\(i,te) -> (i, type2sort te)) vartypes
+  --putStrLn $ "Assertion: " ++ pPrint (pretty assertion)
   let smt   = --concatMap preludeType2SMT (map snd pretypes) ++
               [ EmptyLine ] ++
               --(if null decls
               --   then []
               --   else [ Comment "User-defined datatypes:" ] ++
               --        map tdecl2SMT decls) ++
+              [ EmptyLine, Comment "Polymorphic sorts:" ] ++
+              map (\tv -> DeclareSort tv 0) tvarsInVars ++
               [ EmptyLine, smtfuncs, EmptyLine
               , Comment "Free variables:" ] ++
               map (\(i,s) -> DeclareVar (SV i s)) varsorts ++
               [ EmptyLine
               , Comment "Boolean formula of assertion (known properties):"
-              , sAssert tassertion, EmptyLine
+              , sAssert assertion, EmptyLine
               , Comment "check satisfiability:"
               , CheckSat
               ]
@@ -137,144 +166,6 @@ tconsOfTypeExpr (TCons qName texps) =
 tconsOfTypeExpr (ForallType _ te) =  tconsOfTypeExpr te
 
 ------------------------------------------------------------------------------
--- Type reconstruction in terms occurring in SMT formulas.
--- This is necessary since SMT does not support type instances of
--- polymorphic functions so that appropriate type instances are generated
--- from sorted `QIdent` occurrences when an SMT script is printed.
-
---- Try to add sort information to QIdent occurrences in in terms occurring
---- in an SMT command containing functions and variables
---- from the given arguments.
-addSortsInCmd :: [FuncDecl] -> [(Int,Sort)] -> Command -> Command
-addSortsInCmd fdecls vts cmd = case cmd of
-  Assert t         -> Assert (addSortsInTerm fdecls vts t)
-  DefineFunsRec fs -> DefineFunsRec
-                        (map (\(fd,t) -> (fd, addSortsInTerm fdecls vts t)) fs)
-  DefineSigsRec fs -> DefineSigsRec
-                        (map (\(is,fd,t) ->
-                                (is, fd, addSortsInTerm fdecls vts t)) fs)
-  _                -> cmd
-
--- Try to add sort information to QIdent occurrences in an SMT term containing
--- functions and variables from the given arguments.
--- TODO: improve for general algebraic data types.
-addSortsInTerm :: [FuncDecl] -> [(Int,Sort)] -> Term -> Term
-addSortsInTerm fdecls vsorts term = fst (addSort vsorts term)
- where
-  addSort vts t = case t of
-    TConst l -> case l of TInt    _ -> (t, SComb "Int" [])
-                          TFloat  _ -> (t, SComb "Real" [])
-                          TString _ -> (t, SComb "List" [SComb "Char" []])
-    TSVar v -> maybe (t, SComb "TVar" [])
-                    (\s -> (t,s))
-                    (lookup v vts)
-    TComb qi ts -> let (tts,sts) = unzip (map (addSort vts) ts)
-                       tqid  = transQId sts qi
-                       rtype = resultTypeOfFuncSort (length tts) (qidSort tqid)
-                   in (TComb tqid tts, consResultSort rtype qi sts)
-    Forall svs qt ->
-      let (qts,qs) = addSort (map (\(SV v s) -> (v,s)) svs ++ vts) qt
-      in (Forall svs qts, qs)
-    Exists svs qt ->
-      let (qts,qs) = addSort (map (\(SV v s) -> (v,s)) svs ++ vts) qt
-      in (Exists svs qts, qs)
-    Match ct brs  ->
-      let (cts,ctsort) = addSort vts ct
-          (brss,bsrts) = unzip (map (addSortsInBranch vts ctsort) brs)
-          nonanonts    = filter (/= anonymousType) bsrts
-      in  (Match cts brss,
-           if null nonanonts then anonymousType else head nonanonts)
-    SMT.Let _ _   -> error $ "addSortsInTerm: unsupported: " ++ show t
-
-  addSortsInBranch vts ctsort (pat@(PComb ct pvs), bt) =
-    let pvss = zip pvs (consSort2ArgSorts ct ctsort)
-        (bts, rtype) = addSort (pvss ++ vts) bt
-    in ((pat,bts), rtype)
-
-  -- Compute the result sort of a constructor `ct` from the argument sorts
-  -- provided as the last argument. If this computation fails, the
-  -- default sort (first argument) is returned.
-  consResultSort dftrtype ct argsorts =
-    maybe dftrtype
-          (\(ats,rt) -> maybe dftrtype
-                              (\s -> substSort s rt)
-                              (matchSorts ats argsorts))
-          (lookup (qidName ct) simpleConsTypes)
-
-  -- Compute the list of argument sorts of a constructor `ct` from the result
-  -- sort provided as the second argument. If this computation is not possible,
-  -- a list of anonymous types is returned.
-  consSort2ArgSorts ct csort =
-    maybe (repeat anonymousType)
-          (\(ats,rt) -> maybe (repeat anonymousType)
-                              (\s -> map (substSort s) ats)
-                              (matchSort rt csort))
-          (lookup (qidName ct) simpleConsTypes)
-
-  -- a list of data constructors and their types
-  simpleConsTypes = -- TODO: GENERALIZE!
-    [ ("insert", ([SComb "TVar1" [], SComb "List" [SComb "TVar1" []]],
-                   SComb "List" [SComb "TVar1" []]))
-    , ("mk-pair", ([SComb "TVar1" [], SComb "TVar2" []],
-                   SComb "Pair" [SComb "TVar1" [], SComb "TVar2" []]))
-    ]
-  
-  qidSort (As _ s) = s
-  qidSort (Id _)   = anonymousType
-
-  transQId _ qi@(As _ _) = qi
-  transQId argsorts (Id n) =
-    maybe (transSimpleID n)
-          (\qf -> maybe (trace ("\nOPERATION " ++ n ++ " NOT FOUND!") $ Id n)
-                        (\fd -> let ftype = funcType fd
-                                    funsort = type2sort ftype
-                                in if isMonoType ftype
-                                     then As n funsort
-                                     else transId4FuncType argsorts n funsort)
-                        (find ((== qf) . funcName) fdecls))
-          (untransOpName n)
-  
-  transSimpleID n = -- TODO: extend to all relevant operations
-    maybe (if n `elem` [ "and", "or", "not", "=", "/=", "<", ">", "<=", ">="
-                       , "true", "false", "unit", "nil", "insert", "mk-pair"
-                       , "Nothing", "Just"] ||
-              "is-" `isPrefixOf` n
-             then Id n
-             else trace ("\nSIMPLE OPERATION " ++ n ++ " NOT FOUND!") $ Id n)
-          (\nsort -> As n nsort)
-          (lookup n simpleIdTypes)
-
-  simpleIdTypes =
-    let intFun = SComb "Func" [SComb "Int" [],
-                               SComb "Func" [SComb "Int" [],
-                                             SComb "Int" []]]
-    in [("+", intFun), ("-", intFun)]
-                                      
-  transId4FuncType argsorts n fsort =
-    let ats    = take (length argsorts) (argTypesOfFuncSort fsort)
-        tsubst = matchSorts ats argsorts
-        ti     = maybe fsort (\s -> substSort s fsort) tsubst
-    in
-    --trace ((id $## (n,ti)) `seq` "\nOccurrence of: " ++ show n ++
-    --       "\n" ++ show (ats,argsorts) ++
-    --       "\n" ++ maybe "NO SUBST" showTPSubst tsubst ++
-    --       "\nSUBSTITUTED: " ++ show ti) $
-    As n ti
-  
-  isMonoType te = rnmAllVarsInTypeExpr (+1) te == te
-
-  argTypesOfFuncSort s = case s of
-    SComb tc [s1,s2] | tc == "Func" -> s1 : argTypesOfFuncSort s2
-    _                               -> []
-
-  resultTypeOfFuncSort ar s =
-    if ar <= 0
-      then s
-      else case s of
-             SComb tc [_,s2] | tc == "Func" -> resultTypeOfFuncSort (ar-1) s2
-             _                              -> anonymousType
-
-------------------------------------------------------------------------------
 --- Shows a text with line numbers prefixed:
 showWithLineNums :: String -> String
 showWithLineNums txt =
@@ -298,6 +189,7 @@ ilog n | n>0 = if n<10 then 0 else 1 + ilog (n `div` 10)
 --- Translates a list of operations specified by their qualified name
 --- (together with all operations on which these operation depend on)
 --- into an SMT string that axiomatizes their semantics.
+{-
 funcs2SMT :: Options -> IORef [Prog] -> [QName] -> IO Command
 funcs2SMT opts modsref qns = do
   -- get all relevant functions but exclude character related operations:
@@ -305,6 +197,7 @@ funcs2SMT opts modsref qns = do
   return $ maybe (Comment $ "ERROR translating " ++ show (map funcName funs))
                  DefineSigsRec
                  (mapM fun2SMT funs)
+-}
 
 -- Translate a function declaration into a (possibly polymorphic)
 -- SMT function declaration.
@@ -359,7 +252,13 @@ exp2SMT lhs exp = case exp of
                     t <- exp2SMT lhs e
                     return $ tLet tbs t
   Free _ _    -> Nothing --error "exp2SMT: Free"
-  Typed e _   -> exp2SMT lhs e
+  Typed e te  -> case e of
+    Comb _ qf args | all isTyped args
+       -> mapM (exp2SMT Nothing) args >>=
+          return . makeRHS .
+            TComb (As (transOpName qf)
+                      (type2sort (foldr FuncType te (map exprType args))))
+    _  -> exp2SMT lhs e
   Or    e1 e2 -> do t1 <- exp2SMT lhs e1
                     t2 <- exp2SMT lhs e2
                     return $ tDisj [t1,t2]
@@ -376,6 +275,18 @@ exp2SMT lhs exp = case exp of
   branch2SMT (Branch (Pattern qf vs) e) = do
     t <- exp2SMT lhs e
     return (PComb (Id (transOpName qf)) vs, t)
+
+--- Is a expression typed? (should go into FlatCurry.Goodies)
+isTyped :: Expr -> Bool
+isTyped e = case e of
+  Typed _ _ -> True
+  _         -> False
+
+--- Gets the type of a typed expression. (should go into FlatCurry.Goodies)
+exprType :: Expr -> TypeExpr
+exprType e = case e of
+  Typed _ te -> te
+  _          -> error "FlatCurry.Goodies.exprType: not a typed expression"
 
 --- Translates a literal into an SMT expression.
 --- We represent character as ints.
@@ -512,27 +423,26 @@ primNames =
 ------------------------------------------------------------------------------
 --- Extract all user-defined FlatCurry functions that might be called
 --- by a given list of function names provided as the last argument.
---- The first argument is the list of all function declarations.
---- The second argument is a list of function names that will be excluded
---- (together with the functions called by them).
-getAllFunctions :: Options -> IORef [Prog] -> [QName] -> IO [FuncDecl]
-getAllFunctions opts modsref newfuns = do
-  mods <- readIORef modsref
-  getAllFuncs mods preloadedFuncDecls newfuns
+--- The second argument is an `IORef` to the currently loaded modules.
+--- Its contents will be extended when necessary.
+getAllFunctions :: Options -> IORef ProgInfo -> [QName] -> IO [FuncDecl]
+getAllFunctions opts pistore newfuns = do
+  mods <- fmap (map (miProg . snd) . progInfos) $ readIORef pistore
+  getAllFuncs mods [] {-preloadedFuncDecls-} newfuns
  where
   getAllFuncs _       currfuncs [] = return (reverse currfuncs)
   getAllFuncs allmods currfuncs (newfun:newfuncs)
-    | newfun `elem` excludedCurryOpts ||
+    | newfun `elem` excludedCurryOperations ||
       newfun `elem` map (pre . fst) primNames ||
       newfun `elem` map funcName currfuncs || isPrimOp newfun ||
       isTestPred newfun
     = getAllFuncs allmods currfuncs newfuncs
-    | fst newfun `elem` map progName allmods
+    | fst newfun `elem` map progName allmods -- module already loaded:
     = maybe (error $ "getAllFunctions: " ++ show newfun ++ " not found!")
             (\fdecl -> --print fdecl >>
                        getAllFuncs allmods (fdecl : currfuncs)
                          (newfuncs ++
-                          filter (`notElem` excludedCurryOpts)
+                          filter (`notElem` excludedCurryOperations)
                                  (funcsOfFuncDecl fdecl)))
             (find (\fd -> funcName fd == newfun)
                   (maybe []
@@ -542,12 +452,24 @@ getAllFunctions opts modsref newfuns = do
     = do let mname = fst newfun
          printWhenStatus opts $
            "Loading module '" ++ mname ++ "' for '"++ snd newfun ++"'"
-         newmod <- readTransFlatCurry mname
-         let newmods = allmods ++ [newmod]
-         writeIORef modsref newmods
-         getAllFuncs newmods currfuncs (newfun:newfuncs)
+         addModInfoFor pistore mname
+         newmod <- fmap miProg $ getModInfoFor pistore mname
+         getAllFuncs (newmod : allmods) currfuncs (newfun:newfuncs)
 
   isTestPred (mn,fn) = mn == "Prelude" && "is-" `isPrefixOf` fn
+
+--- Extract all user-defined FlatCurry functions that might be called
+--- by a given list of function names provided as the last argument.
+--- The second argument is an `IORef` to the currently loaded modules.
+--- Its contents will be extended when necessary.
+loadModulesForQNames :: Options -> IORef ProgInfo -> [QName] -> IO ()
+loadModulesForQNames opts pistore qns = mapM_ loadMod (nub (map fst qns))
+ where
+  loadMod m = do
+    mloaded <- hasModInfoFor pistore m
+    unless mloaded $ do -- we must load a new module
+      printWhenStatus opts $ "Loading module '" ++ m ++ "'..."
+      addModInfoFor pistore m
 
 -- Pre-loaded operations from the prelude to avoid reading the prelude
 -- for simple operations.
@@ -562,8 +484,8 @@ preloadedFuncDecls =
 
 --- Exclude character-related operations since characters are treated as
 --- integers so that these operations are not required.
-excludedCurryOpts :: [QName]
-excludedCurryOpts = map pre ["chr", "ord"]
+excludedCurryOperations :: [QName]
+excludedCurryOperations = map pre ["chr", "ord"]
 
 --- Returns the names of all functions occurring in the
 --- body of a function declaration.

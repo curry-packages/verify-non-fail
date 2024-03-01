@@ -48,7 +48,7 @@ NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
 -- Non-fail condition of operation `div1`:
 div1'nonfail :: Int -> Int -> Bool
-div1'nonfail v1 v2 = v2 /= 0
+div1'nonfail v1 v2 = not (v2 == 0)
 
 MODULE 'Diamond' VERIFIED
 

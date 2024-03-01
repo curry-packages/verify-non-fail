@@ -101,31 +101,41 @@ simpClassEq exp = case exp of
   _ -> exp
 
 --- Simplify applications of primitive operations, i.e.,
----     apply (apply op e1) e2 ==> op [e1,e2]
----     apply op e1            ==> op [e1]
+---     apply (apply op e1) e2      ==> op [e1,e2]
+---     apply (apply op e1 :: t) e2 ==> op [e1,e2]
+---     apply op e1                 ==> op [e1]
 simpArithExp :: Expr -> Expr
 simpArithExp exp = case exp of
-  Comb FuncCall qt1
-        [Comb FuncCall qt2
-          [Comb FuncCall (mn,fn) [], e1], e2]
-   | qt1 == pre "apply" && qt2 == pre "apply" && mn == "Prelude"
-   -> maybe exp
-            (\fp -> Comb FuncCall (mn,fp) [e1,e2])
-            (lookup fn binaryPrimOps)
-  Comb FuncCall qt1
-        [Comb FuncCall (mn,fn) [], e1]
-   | qt1 == pre "apply" && mn == "Prelude"
-   -> maybe exp
-            (\fp -> Comb FuncCall (mn,fp) [e1])
-            (lookup fn unaryPrimOps)
-  Comb FuncCall (mn,fn) [e1, e2]
-   -> maybe exp
-            (\fp -> Comb FuncCall (mn,fp) [e1, e2])
-            (lookup fn binaryPrimOps)
-  Comb FuncCall (mn,fn) [e1]
-   -> maybe exp
-            (\fp -> Comb FuncCall (mn,fp) [e1])
-            (lookup fn unaryPrimOps)
-  _ -> exp
+  Comb FuncCall qt1 [Comb FuncCall qt2 [op, e1], e2]
+   | qt1 == pre "apply" && qt2 == qt1
+   -- apply (apply op e1) e2 ==> op [e1,e2]
+   -> case op of Comb FuncCall qn []           -> replaceBinOp qn e1 e2
+                 Typed (Comb FuncCall qn []) _ -> replaceBinOp qn e1 e2
+                 _                             -> exp
+  Comb FuncCall qt1 [Typed (Comb FuncCall qt2 [op, e1]) _, e2]
+   | qt1 == pre "apply" && qt2 == qt1
+   -- apply (apply op e1 :: type) e2 ==> op [e1,e2]
+   -> case op of Comb FuncCall qn []           -> replaceBinOp qn e1 e2
+                 Typed (Comb FuncCall qn []) _ -> replaceBinOp qn e1 e2
+                 _                             -> exp
+  Comb FuncCall qt1 [op, e1] | qt1 == pre "apply" -- apply op e1 ==> op [e1]
+    -> case op of Comb FuncCall qn []           -> replaceUnOp qn e1
+                  Typed (Comb FuncCall qn []) _ -> replaceUnOp qn e1
+                  _                             -> exp
+  Comb FuncCall qn [e1,e2] -> replaceBinOp qn e1 e2
+  Comb FuncCall qn [e1]    -> replaceUnOp qn e1
+  _                        -> exp
+ where
+  replaceBinOp (mn,fn) e1 e2
+    | mn == "Prelude" = maybe exp
+                              (\fp -> Comb FuncCall (mn,fp) [e1,e2])
+                              (lookup fn binaryPrimOps)
+    | otherwise       = exp
+
+  replaceUnOp (mn,fn) e1
+    | mn == "Prelude" = maybe exp
+                              (\fp -> Comb FuncCall (mn,fp) [e1])
+                              (lookup fn unaryPrimOps)
+    | otherwise       = exp
 
 ------------------------------------------------------------------------------

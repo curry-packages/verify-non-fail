@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version February 2024
+--- @version March 2024
 -------------------------------------------------------------------------
 
 module Main where
@@ -21,7 +21,7 @@ import System.Environment          ( getArgs )
 import Debug.Trace ( trace )
 
 -- Imports from dependencies:
-import Analysis.Types             ( Analysis, analysisName, startValue )
+import Analysis.Types             ( Analysis, analysisName )
 import Analysis.TermDomain
 import Analysis.Values
 import Control.Monad.Trans.Class  ( lift )
@@ -32,6 +32,7 @@ import Data.Time                  ( ClockTime )
 import Debug.Profile
 import FlatCurry.Files
 import FlatCurry.Goodies
+import FlatCurry.Names
 import FlatCurry.NormalizeLet
 import FlatCurry.Print
 import FlatCurry.Types
@@ -51,6 +52,7 @@ import Verify.Helpers
 import Verify.IOTypes
 import Verify.NonFailConditions
 import Verify.Options
+import Verify.ProgInfo
 import Verify.Statistics
 import Verify.WithSMT
 
@@ -63,7 +65,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 15/02/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 01/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -93,13 +95,14 @@ main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
                 else error "Unknown analysis domain ID!"
  where
   runWith analysis opts ms = do
+    pistore <- newIORef emptyProgInfo
     astore <- newIORef (AnaStore [])
-    mapM_ (runModuleAction (verifyModule analysis astore opts)) ms
+    mapM_ (runModuleAction (verifyModule analysis pistore astore opts)) ms
 
 --- Verify a single module.
-verifyModule :: TermDomain a => Analysis a -> IORef (AnalysisStore a)
-             -> Options -> String -> IO ()
-verifyModule valueanalysis astore opts0 mname = do
+verifyModule :: TermDomain a => Analysis a -> IORef ProgInfo
+             -> IORef (AnalysisStore a) -> Options -> String -> IO ()
+verifyModule valueanalysis pistore astore opts0 mname = do
   z3exists <- fileInPath "z3"
   let z3msg = "Option '--nosmt' activated since SMT solver Z3 not found in PATH!"
   opts <- if z3exists
@@ -107,7 +110,7 @@ verifyModule valueanalysis astore opts0 mname = do
             else do putStrLn z3msg
                     return opts0 { optSMT = False }
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
-  flatprog <- readTransFlatCurry mname
+  flatprog <- getFlatProgFor pistore mname
   let fdecls       = progFuncs flatprog
       numfdecls    = length fdecls
       visfuncs     = map funcName (filter ((== Public) . funcVisibility) fdecls)
@@ -119,7 +122,7 @@ verifyModule valueanalysis astore opts0 mname = do
       then do
         whenStatus opts $ putStr $ "Reading abstract types of imports: " ++
           unwords (progImports flatprog)
-        readTypesOfModules opts (verifyModule valueanalysis astore)
+        readTypesOfModules opts (verifyModule valueanalysis pistore astore)
                            (progImports flatprog)
       else return ([],[],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
@@ -138,7 +141,7 @@ verifyModule valueanalysis astore opts0 mname = do
   -- read previously inferred non-fail conditions:
   mbnfconds <- readNonFailCondFile opts mtime mname
 
-  vstate <- initVerifyState flatprog allcons
+  vstate <- initVerifyState pistore flatprog allcons
                             (Map.fromList impacalltypes)
                             (Map.fromList impnftypes)
                             (Map.fromList acalltypes)
@@ -393,7 +396,8 @@ showIncompleteBranch qf e [] =
 -- * the tool options
 -- It is parameterized over the abstract term domain.
 data VerifyState a = VerifyState
-  { vstModules     :: IORef [Prog]      -- all function declarations of module
+  { vstModules     :: IORef ProgInfo    -- all infos about loaded modules
+  , vstCurrModule  :: String            -- name of the current module
   , vstCurrFunc    :: (QName,Int,[Int]) -- name/arity/args of current function
   , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
   , vstFreshVar    :: Int               -- fresh variable index in a rule
@@ -415,20 +419,19 @@ data VerifyState a = VerifyState
   }
 
 --- Initializes the verification state.
-initVerifyState :: TermDomain a => Prog -> [[(QName,Int)]]
+initVerifyState :: TermDomain a => IORef ProgInfo -> Prog -> [[(QName,Int)]]
                 -> Map.Map QName (ACallType a) -> Map.Map QName NonFailCond
                 -> Map.Map QName (ACallType a)
                 -> Map.Map QName (InOutType a)
                 -> [(QName,NonFailCond)] -> Options
                 -> IO (VerifyState a)
-initVerifyState flatprog allcons impacalltypes impfconds acalltypes
+initVerifyState pistore flatprog allcons impacalltypes impfconds acalltypes
                 iotypes nfconds opts = do
   unless (null nonfailconds) $ printWhenIntermediate opts $
     "INITIAL NON-FAIL CONDITIONS:\n" ++
     showConditions (progFuncs flatprog) nonfailconds
-  progref <- newIORef [flatprog]
-  return $ VerifyState progref (("",""),0,[]) allcons 0 [] [] id
-                       impacalltypes nfacalltypes iotypes [] [] []
+  return $ VerifyState pistore (progName flatprog) (("",""),0,[]) allcons 0
+                       [] [] id impacalltypes nfacalltypes iotypes [] [] []
                        impfconds nonfailconds [] (0,0) opts
  where
   nonfailconds = unionBy (\x y -> fst x == fst y) nfconds
@@ -445,8 +448,8 @@ type VerifyStateM atype a = StateT (VerifyState atype) IO a
 -- Gets the function declarations of the current module.
 currentFuncDecls :: TermDomain a => VerifyState a -> IO [FuncDecl]
 currentFuncDecls st = do
-   allmods <- readIORef (vstModules st)
-   return $ progFuncs (head allmods)
+   prog <- getFlatProgFor (vstModules st) (vstCurrModule st)
+   return $ progFuncs prog
 
 -- Sets the name and arity of the current function in the state.
 setCurrentFunc :: TermDomain a => QName -> Int -> [Int] -> VerifyStateM a ()
@@ -511,11 +514,11 @@ addConditionRestriction qf cond = do
     bcond <- getExpandedCondition
     let newcond = fcAnd oldcalltypecond
                     (if cond == fcTrue
-                       then simpExpr $ fcNot bcond
+                       then fcNot bcond
                        else -- the current branch condition implies the condition:
                             fcOr (fcNot bcond) cond)
     printIfVerb 2 $ "New call condition for function '" ++ snd qf ++ "': " ++
-                    showExp newcond ++
+                    showSimpExp newcond ++
                  (if totaloldct then "" else " (due to non-trivial call type)")
     printIfVerb 3 $ "Check satisfiability of new call condition..."
     unsat <- isUnsatisfiable newcond
@@ -548,7 +551,8 @@ aCallType2Bool allcons vs (Just argts) =
  where
   act2cond (v,at) = fcAnds $
     map (\ct -> if all isAnyType (argTypesOfCons ct (arityOfCons allcons ct) at)
-                  then Comb FuncCall (pre $ "is-" ++ transOpName ct) [Var v]
+                  then transTester FuncCall (pre $ "is-" ++ transOpName ct)
+                                   [Var v]
                   else fcFalse )
         (consOfType at)
 
@@ -714,7 +718,7 @@ addSingleCase casevar qc branchvars = do
                \c -> (vstCondition st)
                        (Case Rigid (Var casevar)
                           [Branch (Pattern qc branchvars) c,
-                           Branch (Pattern (pre "_") []) fcFalse]) }
+                           Branch (Pattern anonCons []) fcFalse]) }
 
 -- Adds an equality between a variable and an expression as a conjunct
 -- to the current condition.
@@ -725,6 +729,7 @@ addEquVarCondition var exp = do
                else if exp == fcFalse
                       then fcNot (Var var)
                       else Comb FuncCall (pre "==") [Var var, exp]
+                           -- note: the Eq class dictioniary is missing...
   addConjunct conj
 
 -- Gets the call condition of a given operation.
@@ -1048,7 +1053,8 @@ checkDivOpNonZero exp cont = case exp of
                  return []
          else do v1 <- verifyExpr True arg1
                  v2 <- verifyExpr True arg2
-                 let nfcond = Comb FuncCall (pre "/=") [Var v2, Lit (Intc 0)]
+                 let nfcond = fcNot (Comb FuncCall (pre "==")
+                                          [Var v2, Lit (Intc 0)])
                  verifyNonTrivFuncCall exp qf [v1,v2] failACallType
                    ([(v2, fcInt)], nfcond)
                  cont
@@ -1118,7 +1124,8 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   -- check whether a constructor is excluded by the current call condition:
   checkMissCons cs = do
     printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
-    let iscons = Comb FuncCall (pre $ "is-" ++ transOpName cs) [Var casevar]
+    let iscons = transTester FuncCall (pre $ "is-" ++ transOpName cs)
+                             [Var casevar]
     bcond <- getExpandedCondition
     unsat <- isUnsatisfiable (fcAnd iscons bcond)
     return $ if unsat then [] else [cs]

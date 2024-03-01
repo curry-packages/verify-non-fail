@@ -7,7 +7,7 @@
 --- SMT-LIB language specified in the package `smtlib`.
 ---
 --- @author  Michael Hanus
---- @version January 2024
+--- @version February 2024
 ------------------------------------------------------------------------------
 
 module Verify.ESMT where
@@ -483,11 +483,9 @@ unpoly commands =
       in DefineSigsRec ftss : addSigs qids1 cmds
     _ -> cmd : addSigs (union (allQIdsOfAssert cmd) qids) cmds
 
-  -- remove remaining polymorphic signatures and rename qualified names
-  -- according to their sorts
+  -- rename qualified names according to their sorts
   unpolyCmd sigs cmd = case cmd of
-    DefineSigsRec fts -> DefineSigsRec $ map rnmTermInSig
-                                           (filter (\ (ps,_,_) -> null ps) fts)
+    DefineSigsRec fts -> DefineSigsRec $ map rnmTermInSig fts
     Assert term       -> Assert (rnmQIdWithTInstTerm sigs term)
     _ -> cmd
    where

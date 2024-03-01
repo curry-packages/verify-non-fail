@@ -29,5 +29,5 @@ TESTPROGS="Fac UseFac FacMore FacIO UseDiv Diamond Sig ListLength Nth NthInfer N
 # Testing standard (top constructor) domain:
 TOOL="curry-calltypes"
 
-$TOOL -r -q $TESTPROGS | tee $LOGFILE
+$TOOL -r -q $TESTPROGS 2>&1 | tee $LOGFILE
 check_diff $LOGFILE RESULTEXAMPLES.txt
