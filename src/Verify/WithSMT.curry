@@ -60,20 +60,6 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore
   transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
 
--- Get all qualified names occurring in an expression.
-allQNamesInExp :: Expr -> [QName]
-allQNamesInExp e =
-  trExpr (const id) (const id) comb lt fr (.) cas branch const e []
- where
-  comb _ qn exp = (qn:) . foldr (.) id exp
-  lt bs exp = exp . foldr (.) id (map snd bs)
-  fr _ exp = exp
-  cas _ exp bs = exp . foldr (.) id bs
-  branch pat exp = ((args pat)++) . exp
-  args (Pattern qc _) = [qc]
-  args (LPattern _)   = []
-
-
 checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
                   -> [(Int,TypeExpr)] -> Term -> IO (Maybe Bool)
 checkUnsatWithSMT opts qf title pistore vartypes assertion =
@@ -166,6 +152,20 @@ tconsOfTypeExpr (TCons qName texps) =
 tconsOfTypeExpr (ForallType _ te) =  tconsOfTypeExpr te
 
 ------------------------------------------------------------------------------
+-- Get all qualified names occurring in an expression.
+allQNamesInExp :: Expr -> [QName]
+allQNamesInExp e =
+  trExpr (const id) (const id) comb lt fr (.) cas branch const e []
+ where
+  comb _ qn exp = (qn:) . foldr (.) id exp
+  lt bs exp = exp . foldr (.) id (map snd bs)
+  fr _ exp = exp
+  cas _ exp bs = exp . foldr (.) id bs
+  branch pat exp = ((args pat)++) . exp
+  args (Pattern qc _) = [qc]
+  args (LPattern _)   = []
+
+------------------------------------------------------------------------------
 --- Shows a text with line numbers prefixed:
 showWithLineNums :: String -> String
 showWithLineNums txt =
@@ -186,20 +186,7 @@ ilog :: Int -> Int
 ilog n | n>0 = if n<10 then 0 else 1 + ilog (n `div` 10)
 
 ---------------------------------------------------------------------------
---- Translates a list of operations specified by their qualified name
---- (together with all operations on which these operation depend on)
---- into an SMT string that axiomatizes their semantics.
-{-
-funcs2SMT :: Options -> IORef [Prog] -> [QName] -> IO Command
-funcs2SMT opts modsref qns = do
-  -- get all relevant functions but exclude character related operations:
-  funs <- getAllFunctions opts modsref (nub qns)
-  return $ maybe (Comment $ "ERROR translating " ++ show (map funcName funs))
-                 DefineSigsRec
-                 (mapM fun2SMT funs)
--}
-
--- Translate a function declaration into a (possibly polymorphic)
+-- Translates a function declaration into a (possibly polymorphic)
 -- SMT function declaration.
 fun2SMT :: FuncDecl -> Maybe ([Ident],FunSig,Term)
 fun2SMT (Func qn _ _ texp rule) = do
@@ -214,7 +201,7 @@ fun2SMT (Func qn _ _ texp rule) = do
     tEqu (tComb (transOpName qn) []) (tComb ("External:" ++ s) [])
   rule2SMT (Rule vs exp) = do
     let isnd = ndExpr exp
-        lhs = tComb (transOpName qn) (map TSVar vs)
+        lhs  = tComb (transOpName qn) (map TSVar vs)
     rhs <- exp2SMT (if isnd then Just lhs else Nothing) (simpExpr exp)
     return $
       Forall (map (\ (v,t) -> SV v (type2sort t))
