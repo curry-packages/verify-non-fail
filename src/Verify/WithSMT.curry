@@ -10,12 +10,14 @@ module Verify.WithSMT
 
 import Control.Monad     ( unless, when )
 import Data.IORef
-import Data.List         ( find, init, isPrefixOf, last, nub, partition, union )
+import Data.List         ( find, init, isPrefixOf, last, maximum, nub
+                         , partition, union )
 import Data.Maybe        ( catMaybes, fromMaybe, isJust )
 import Numeric           ( readHex )
 import System.CPUTime    ( getCPUTime )
 import Debug.Trace
 
+import Control.Monad.Trans.State
 import FlatCurry.AddTypes
 import FlatCurry.Build
 import FlatCurry.Files   ( readFlatCurry )
@@ -52,17 +54,18 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore
   --putStrLn $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedexp
   maybe
     (transExpError typedexp)
-    (\assertion ->
-       catch (checkUnsatWithSMT opts qf scripttitle pistore vartypes assertion)
+    (\ (assertion,varsorts) ->
+       catch (checkUnsatWithSMT opts qf scripttitle pistore vartypes
+                                varsorts assertion)
              (\e -> print e >> return Nothing))
-    (exp2SMT Nothing (simpExpr typedexp))
+    (exp2SMTWithVars Nothing (simpExpr typedexp))
  where
   transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
 
 checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
-                  -> [(Int,TypeExpr)] -> Term -> IO (Maybe Bool)
-checkUnsatWithSMT opts qf title pistore vartypes assertion =
+                  -> [(Int,TypeExpr)] -> [(Int,Sort)] -> Term -> IO (Maybe Bool)
+checkUnsatWithSMT opts qf title pistore vartypes extravars assertion =
   flip catch (\e -> print e >> return Nothing) $ do
   let allsyms = nub (catMaybes
                        (map (\n -> maybe Nothing Just (untransOpName n))
@@ -90,7 +93,7 @@ checkUnsatWithSMT opts qf title pistore vartypes assertion =
       tvarsInVars = foldr union []
                           (map (typeParamsOfSort . type2sort)
                           (map snd vartypes ++ map TVar fdecltvars))
-      varsorts = map (\(i,te) -> (i, type2sort te)) vartypes
+      varsorts = map (\(i,te) -> (i, type2sort te)) vartypes ++ extravars
   --putStrLn $ "Assertion: " ++ pPrint (pretty assertion)
   let smt   = --concatMap preludeType2SMT (map snd pretypes) ++
               [ EmptyLine ] ++
@@ -202,10 +205,12 @@ fun2SMT (Func qn _ _ texp rule) = do
   rule2SMT (Rule vs exp) = do
     let isnd = ndExpr exp
         lhs  = tComb (transOpName qn) (map TSVar vs)
-    rhs <- exp2SMT (if isnd then Just lhs else Nothing) (simpExpr exp)
+    (rhs,varsorts) <- exp2SMTWithVars (if isnd then Just lhs else Nothing)
+                                      (simpExpr exp)
     return $
       Forall (map (\ (v,t) -> SV v (type2sort t))
-                  (funcType2TypedVars vs texp))
+                  (funcType2TypedVars vs texp) ++
+              map (\ (v,s) -> SV v s) varsorts)
              (if isnd then rhs else tEqu lhs rhs)
 
 --- Returns `True` if the expression is non-deterministic,
@@ -220,6 +225,18 @@ ndExpr = trExpr (\_ -> False)
                 (\_ nd bs -> nd || or bs)
                 (\_ -> id)
                 (\nd _ -> nd)
+
+-- Translates a (Boolean) FlatCurry expression into an SMT expression.
+-- If the first argument is an SMT expression, an equation between
+-- this expression and the translated result expression is generated.
+-- This is useful to axiomatize non-deterministic operations.
+-- If successful, the translated SMT expression together with new variables
+-- (which are replacements for higher-order applications) are returned.
+exp2SMTWithVars :: Maybe Term -> Expr -> Maybe (Term, [(Int,Sort)])
+exp2SMTWithVars lhs exp =
+  maybe Nothing
+        (\t -> Just $ elimApply t)
+        (exp2SMT lhs exp)
 
 -- Translates a (Boolean) FlatCurry expression into an SMT expression.
 -- If the first argument is an SMT expression, an equation between
@@ -281,6 +298,70 @@ lit2SMT :: Literal -> Term
 lit2SMT (Intc i)   = TConst (TInt i)
 lit2SMT (Floatc f) = TConst (TFloat f)
 lit2SMT (Charc c)  = TConst (TInt (ord c))
+
+----------------------------------------------------------------------------
+-- Implementation of a transformation which replaces occurrences of
+-- `Prelude_apply` by new fresh variables.
+
+-- The state for this transformation.
+data TransApplyState = TransApplyState
+  { tsFreshVarIndex :: Int           -- fresh variable index
+  , tsNewVars       :: [(Int,Sort)]  -- new typed variables
+  }
+
+type TAState a = State TransApplyState a
+
+-- Transforms a term by replacing occurrences of
+-- `Prelude_apply` with new fresh variables.
+elimApply :: Term -> (Term, [(Int,Sort)])
+elimApply trm =
+  let st0 = TransApplyState (maximum (0 : allVarsInTerm trm) + 1) []
+      (ntrm,st1) = runState (elimAppyInTerm trm) st0
+  in (ntrm, reverse (tsNewVars st1))
+
+elimAppyInTerm :: Term -> TAState Term
+elimAppyInTerm t = case t of
+  TConst _      -> return t
+  TSVar _       -> return t
+  TComb (As n srt) [_,_] | n == "Prelude_apply"
+    -> do st <- get
+          let fv = tsFreshVarIndex st
+              fvt = (fv, applyRSort srt)
+          put st { tsFreshVarIndex = tsFreshVarIndex st + 1
+                 , tsNewVars = fvt : tsNewVars st }
+          return (TSVar fv)
+
+  TComb qid ts  -> mapM elimAppyInTerm ts >>= return . TComb qid
+  SMT.Let bs bt -> do trbs <- mapM (elimAppyInTerm . snd) bs
+                      trbt <- elimAppyInTerm bt
+                      return $ SMT.Let (zip (map fst bs) trbs) trbt
+  Forall vs te  -> elimAppyInTerm te >>= return . Forall vs
+  Exists vs te  -> elimAppyInTerm te >>= return . Exists vs
+  Match mt brs  -> do trmt <- elimAppyInTerm mt
+                      trbs <- mapM (elimAppyInTerm . snd) brs
+                      return $ Match trmt (zip (map fst brs) trbs)
+ where
+  applyRSort srt = case srt of
+    SComb _ [_, SComb _ [_, rsort ]] -> rsort
+    _ -> error "INTERNAL ERROR: illegal sort for Prelude_apply"
+
+                       
+-- All variables occurring in a SMT term.
+allVarsInTerm :: Term -> [SVar]
+allVarsInTerm (TConst _)      = []
+allVarsInTerm (TSVar v)       = [v]
+allVarsInTerm (TComb _ args)  = foldr union [] (map allVarsInTerm args)
+allVarsInTerm (Forall vs arg) = union (map varOfSV vs) (allVarsInTerm arg)
+allVarsInTerm (Exists vs arg) = union (map varOfSV vs) (allVarsInTerm arg)
+allVarsInTerm (SMT.Let bs e)  =
+  foldr union (map fst bs) (map allVarsInTerm (e : map snd bs))
+allVarsInTerm (Match e ps)    =
+  foldr union [] (map allVarsInTerm (e : map snd ps) ++ map (patVars . fst) ps)
+ where
+  patVars (PComb _ vs) = vs
+
+varOfSV :: SortedVar -> SVar
+varOfSV (SV v _) = v
 
 ----------------------------------------------------------------------------
 --- Translates a FlatCurry type expression into a corresponding SMT sort.
