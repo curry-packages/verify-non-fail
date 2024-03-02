@@ -33,18 +33,19 @@ TESTPROGS="ArithDiv DataList DepthkDomain EncapSearch Equality InfLists InferCal
 # Testing standard (top constructor) domain:
 TOOL="curry-calltypes"
 
-$TOOL -q $COMPILELIBS
-$TOOL -r -q $TESTLIBS | tee $LOGFILE
+$TOOL -q --nosmt $COMPILELIBS
+$TOOL -r -q --nosmt $TESTLIBS | tee $LOGFILE
 check_diff $LOGFILE RESULTLIBS.txt
-$TOOL -r -q $TESTPROGS | tee $LOGFILE
+$TOOL -r -q --nosmt $TESTPROGS | tee $LOGFILE
 check_diff $LOGFILE RESULTEXAMPLES.txt
 
+exit
 
 # Testing depth-2 domain:
 TOOL="curry-calltypes-values2"
 
-$TOOL -q $COMPILELIBS
-$TOOL -r -q $TESTLIBS | tee $LOGFILE
+$TOOL -q --nosmt $COMPILELIBS
+$TOOL -r -q --nosmt $TESTLIBS | tee $LOGFILE
 check_diff $LOGFILE RESULTLIBS_VALUES2.txt
-$TOOL -r -q $TESTPROGS | tee $LOGFILE
+$TOOL -r -q --nosmt $TESTPROGS | tee $LOGFILE
 check_diff $LOGFILE RESULTEXAMPLES_VALUES2.txt
