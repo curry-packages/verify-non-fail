@@ -65,7 +65,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 01/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 02/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -1270,8 +1270,9 @@ isUnsatisfiable bexp = do
       unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
         "WARNING in operation '" ++ snd fname ++
         "': missing variables in unsatisfiability check!"
+      allcons <- getAllCons
       answer <- lift $ checkUnsatisfiabilityWithSMT (vstToolOpts st)
-                         fname question (vstModules st) vtypes bexp
+                         fname question (vstModules st) allcons vtypes bexp
       return (maybe False id answer)
     else return False
 

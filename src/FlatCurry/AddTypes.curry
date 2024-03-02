@@ -24,14 +24,14 @@ import FlatCurry.Types
 import Verify.Helpers     ( removeTopForallType )
 import Verify.ProgInfo
 
-main :: String -> IO ()
-main mname = do
+testAddTypes :: String -> IO ()
+testAddTypes mname = do
   progs <- fmap (map removeTopForallType) (readFlatCurryWithImports mname)
-  mainWithProgs mname (map (\p -> (progName p, prog2ModInfo p)) progs)
+  testAddTypesWithProgs mname (map (\p -> (progName p, prog2ModInfo p)) progs)
 
-mainWithProgs :: String -> [(String,ModInfo)] -> IO ()
-mainWithProgs mname progs = do
-  let st = transInfoFrom progs defaultAddTypeOptsAll
+testAddTypesWithProgs :: String -> [(String,ModInfo)] -> IO ()
+testAddTypesWithProgs mname progs = do
+  let st = transInfoFrom progs defaultAddTypeOptsPoly
   putStrLn $ showFlatProg (evalState (addTypes2Module mname) st)
 
 addTypes2FuncDecls :: [(String,ModInfo)] -> [FuncDecl] -> [FuncDecl]

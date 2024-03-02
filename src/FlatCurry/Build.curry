@@ -41,12 +41,15 @@ fcList te = TCons (pre "[]") [te]
 ------------------------------------------------------------------------------
 -- Expressions:
 
+--- `Prelude.True`
 fcTrue :: Expr
 fcTrue = Comb ConsCall (pre "True") []
 
+--- `Prelude.False`
 fcFalse :: Expr
 fcFalse = Comb ConsCall (pre "False") []
 
+--- Negation of an expression.
 fcNot :: Expr -> Expr
 fcNot e = case e of
   Comb ConsCall qf []      | qf == pre "False" -> fcTrue
@@ -80,6 +83,10 @@ fcAnds = foldr fcAnd fcTrue
 -- Equality between two expressions.
 fcEqu :: Expr -> Expr -> Expr
 fcEqu e1 e2 = Comb FuncCall (pre "==") [e1,e2]
+
+-- `Prelude.failed`
+fcFailed :: Expr
+fcFailed = Comb FuncCall (pre "failed") []
 
 ----------------------------------------------------------------------------
 --- Transform name into Prelude-qualified name.

@@ -10,7 +10,7 @@ module Verify.WithSMT
 
 import Control.Monad     ( unless, when )
 import Data.IORef
-import Data.List         ( find, init, isPrefixOf, last, maximum, nub
+import Data.List         ( (\\), find, init, isPrefixOf, last, maximum, nub
                          , partition, union )
 import Data.Maybe        ( catMaybes, fromMaybe, isJust )
 import Numeric           ( readHex )
@@ -42,8 +42,8 @@ import PackageConfig      ( getPackagePath )
 -- If the implication is `False`, the unsatisfiability of the assertion
 -- is checked.
 checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef ProgInfo
-                             -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
-checkUnsatisfiabilityWithSMT opts qf scripttitle pistore
+          -> [[(QName,Int)]] -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
+checkUnsatisfiabilityWithSMT opts qf scripttitle pistore allcons
                              vartypes assertionexp = do
   let qns = filter (/= anonCons) (allQNamesInExp assertionexp)
   --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
@@ -55,7 +55,7 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore
   maybe
     (transExpError typedexp)
     (\ (assertion,varsorts) ->
-       catch (checkUnsatWithSMT opts qf scripttitle pistore vartypes
+       catch (checkUnsatWithSMT opts qf scripttitle pistore allcons vartypes
                                 varsorts assertion)
              (\e -> print e >> return Nothing))
     (exp2SMTWithVars Nothing (simpExpr typedexp))
@@ -64,8 +64,9 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore
                        return Nothing
 
 checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
+                  -> [[(QName,Int)]] 
                   -> [(Int,TypeExpr)] -> [(Int,Sort)] -> Term -> IO (Maybe Bool)
-checkUnsatWithSMT opts qf title pistore vartypes extravars assertion =
+checkUnsatWithSMT opts qf title pistore allcons vartypes extravars assertion =
   flip catch (\e -> print e >> return Nothing) $ do
   let allsyms = nub (catMaybes
                        (map (\n -> maybe Nothing Just (untransOpName n))
@@ -74,7 +75,8 @@ checkUnsatWithSMT opts qf title pistore vartypes extravars assertion =
     "Translating operations into SMT: " ++ unwords (map showQName allsyms)
   fdecls0 <- getAllFunctions opts pistore allsyms
   pinfos <- fmap progInfos $ readIORef pistore
-  let fdecls = addTypes2FuncDecls pinfos fdecls0
+  let fdecls = addTypes2FuncDecls pinfos
+                 (map (completeBranchesInFunc allcons) fdecls0)
   --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
   --smtfuncs <- funcs2SMT opts modsref allsyms
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
@@ -226,6 +228,40 @@ ndExpr = trExpr (\_ -> False)
                 (\_ -> id)
                 (\nd _ -> nd)
 
+-- Complete all partial case branches by adding final branch `_ -> failed`.
+completeBranchesInFunc :: [[(QName,Int)]] -> FuncDecl -> FuncDecl
+completeBranchesInFunc allcons (Func qf ar vis te rule) = Func qf ar vis te $
+  case rule of External _ -> rule
+               Rule vs e  -> Rule vs (completeBranches e)
+ where
+  completeBranches = trExpr Var Lit Comb FC.Let Free Or updCase Branch Typed
+   where
+    -- extend partial branches to `_ -> failed`.
+    updCase ct e brs = Case ct e $ case brs of
+      []                           -> []
+      Branch (LPattern _) _   : _  -> brs
+      Branch (Pattern qc _) _ : bs ->
+        let otherqs  = map ((\p -> (patCons p, length (patArgs p)))
+                                      . branchPattern) bs
+            siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
+                             id
+                             (getSiblingsOf allcons qc)
+        in brs ++ if null (siblings \\ otherqs)
+                    then []
+                    else [Branch (Pattern anonCons []) fcFailed]
+
+-- Replace occurrences of `Prelude.apply` and partial applications by
+-- `Prelude.failed` in an expression.
+elimApplyPartialInExp :: Expr -> Expr
+elimApplyPartialInExp =
+  trExpr Var Lit updComb FC.Let Free Or Case Branch Typed
+ where
+  updComb ct qn args = case ct of
+    FuncPartCall _ -> fcFailed
+    ConsPartCall _ -> fcFailed
+    FuncCall | qn == pre "apply" -> fcFailed
+    _              -> Comb ct qn args
+
 -- Translates a (Boolean) FlatCurry expression into an SMT expression.
 -- If the first argument is an SMT expression, an equation between
 -- this expression and the translated result expression is generated.
@@ -236,7 +272,7 @@ exp2SMTWithVars :: Maybe Term -> Expr -> Maybe (Term, [(Int,Sort)])
 exp2SMTWithVars lhs exp =
   maybe Nothing
         (\t -> Just $ elimApply t)
-        (exp2SMT lhs exp)
+        (exp2SMT lhs (elimApplyPartialInExp exp))
 
 -- Translates a (Boolean) FlatCurry expression into an SMT expression.
 -- If the first argument is an SMT expression, an equation between
@@ -323,14 +359,13 @@ elimAppyInTerm :: Term -> TAState Term
 elimAppyInTerm t = case t of
   TConst _      -> return t
   TSVar _       -> return t
-  TComb (As n srt) [_,_] | n == "Prelude_apply"
+  TComb (As n srt) [] | n == "Prelude_failed"
     -> do st <- get
           let fv = tsFreshVarIndex st
-              fvt = (fv, applyRSort srt)
+              fvt = (fv, srt) -- sort is type of `failed`
           put st { tsFreshVarIndex = tsFreshVarIndex st + 1
                  , tsNewVars = fvt : tsNewVars st }
           return (TSVar fv)
-
   TComb qid ts  -> mapM elimAppyInTerm ts >>= return . TComb qid
   SMT.Let bs bt -> do trbs <- mapM (elimAppyInTerm . snd) bs
                       trbt <- elimAppyInTerm bt
@@ -340,11 +375,6 @@ elimAppyInTerm t = case t of
   Match mt brs  -> do trmt <- elimAppyInTerm mt
                       trbs <- mapM (elimAppyInTerm . snd) brs
                       return $ Match trmt (zip (map fst brs) trbs)
- where
-  applyRSort srt = case srt of
-    SComb _ [_, SComb _ [_, rsort ]] -> rsort
-    _ -> error "INTERNAL ERROR: illegal sort for Prelude_apply"
-
                        
 -- All variables occurring in a SMT term.
 allVarsInTerm :: Term -> [SVar]
@@ -553,7 +583,8 @@ preloadedFuncDecls =
 --- Exclude character-related operations since characters are treated as
 --- integers so that these operations are not required.
 excludedCurryOperations :: [QName]
-excludedCurryOperations = map pre ["chr", "ord"]
+excludedCurryOperations =
+  map pre ["apply", "failed", "chr", "ord"]
 
 --- Returns the names of all functions occurring in the
 --- body of a function declaration.
