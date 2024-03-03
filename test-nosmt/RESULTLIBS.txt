@@ -58,6 +58,7 @@ foldr1: (_, {:})
 head: {:}
 mod: <FAILING>
 quot: <FAILING>
+read: <FAILING>
 rem: <FAILING>
 showTuple: {:}
 solve: {True}
