@@ -178,7 +178,7 @@ getSiblingsOf allcons qc =
         (\qcs -> Just $ deleteBy (\x y -> fst x == fst y) (qc,0) qcs)
         (find ((qc `elem`) . map fst) allcons)
 
---- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
+--- Gets the arity of a constructor w.r.t. all constructors grouped by types.
 arityOfCons :: [[(QName,Int)]] -> QName -> Int
 arityOfCons allcons qc@(mn,cn)
   | null mn -- literal?

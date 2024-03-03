@@ -34,7 +34,6 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Time                  ( ClockTime )
 import Debug.Profile
-import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Names
 import FlatCurry.NormalizeLet
@@ -69,7 +68,7 @@ import FlatCurry.Simplify         ( simpExpr )
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 02/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 03/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -556,8 +555,7 @@ aCallType2Bool allcons vs (Just argts) =
  where
   act2cond (v,at) = fcAnds $
     map (\ct -> if all isAnyType (argTypesOfCons ct (arityOfCons allcons ct) at)
-                  then transTester FuncCall (pre $ "is-" ++ transOpName ct)
-                                   [Var v]
+                  then transTester ct (arityOfCons allcons ct) (Var v)
                   else fcFalse )
         (consOfType at)
 
@@ -1128,8 +1126,8 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   -- check whether a constructor is excluded by the current call condition:
   checkMissCons cs = do
     printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
-    let iscons = transTester FuncCall (pre $ "is-" ++ transOpName cs)
-                             [Var casevar]
+    allcons <- getAllCons
+    let iscons = transTester cs (arityOfCons allcons cs) (Var casevar)
     bcond <- getExpandedCondition
     unsat <- isUnsatisfiable (fcAnd iscons bcond)
     return $ if unsat then [] else [cs]

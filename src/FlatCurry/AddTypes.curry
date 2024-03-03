@@ -17,7 +17,7 @@ import FlatCurry.Build
 import FlatCurry.Goodies
 import FlatCurry.Names    ( anonCons )
 import FlatCurry.Print
-import FlatCurry.Read
+import FlatCurry.Read     ( readFlatCurryWithImports )
 import FlatCurry.Simplify ( simpExpr )
 import FlatCurry.Types
 

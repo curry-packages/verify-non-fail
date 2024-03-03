@@ -20,7 +20,6 @@ import Debug.Trace
 import Control.Monad.Trans.State
 import FlatCurry.AddTypes
 import FlatCurry.Build
-import FlatCurry.Files   ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Names
 import FlatCurry.Print
@@ -462,8 +461,7 @@ decodeSpecialChars (c:cs)
 --- Translates a qualified FlatCurry name into an SMT string.
 transOpName :: QName -> String
 transOpName (mn,fn)
- | mn=="Prelude" = fromMaybe (if "is-" `isPrefixOf` fn then fn else tname)
-                             (lookup fn primNames)
+ | mn=="Prelude" = fromMaybe tname (lookup fn primNames)
  | otherwise     = tname
  where
   tname = mn ++ "_" ++ encodeSpecialChars fn
@@ -471,14 +469,11 @@ transOpName (mn,fn)
 --- Translates a (translated) SMT string back into qualified FlatCurry name.
 --- Returns Nothing if it was not a qualified name.
 untransOpName :: String -> Maybe QName
-untransOpName s
- | "is-" `isPrefixOf` s
- = Nothing -- selectors are not a qualified name
- | otherwise
- = let (mn,ufn) = break (=='_') s
-   in if null ufn
-        then Nothing
-        else Just (mn, decodeSpecialChars (tail ufn))
+untransOpName s =
+  let (mn,ufn) = break (=='_') s
+  in if null ufn
+       then Nothing
+       else Just (mn, decodeSpecialChars (tail ufn))
 
 ----------------------------------------------------------------------------
 --- Some primitive names of the prelude and their SMT names.
@@ -532,8 +527,7 @@ getAllFunctions opts pistore newfuns = do
   getAllFuncs allmods currfuncs (newfun:newfuncs)
     | newfun `elem` excludedCurryOperations ||
       newfun `elem` map (pre . fst) primNames ||
-      newfun `elem` map funcName currfuncs || isPrimOp newfun ||
-      isTestPred newfun
+      newfun `elem` map funcName currfuncs || isPrimOp newfun
     = getAllFuncs allmods currfuncs newfuncs
     | fst newfun `elem` map progName allmods -- module already loaded:
     = maybe (error $ "getAllFunctions: " ++ show newfun ++ " not found!")
@@ -553,8 +547,6 @@ getAllFunctions opts pistore newfuns = do
          addModInfoFor pistore mname
          newmod <- fmap miProg $ getModInfoFor pistore mname
          getAllFuncs (newmod : allmods) currfuncs (newfun:newfuncs)
-
-  isTestPred (mn,fn) = mn == "Prelude" && "is-" `isPrefixOf` fn
 
 --- Extract all user-defined FlatCurry functions that might be called
 --- by a given list of function names provided as the last argument.
