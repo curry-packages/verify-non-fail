@@ -75,7 +75,7 @@ checkUnsatWithSMT opts qf title pistore allcons vartypes extravars assertion =
   fdecls0 <- getAllFunctions opts pistore allsyms
   pinfos <- fmap progInfos $ readIORef pistore
   let fdecls = addTypes2FuncDecls pinfos
-                 (map (completeBranchesInFunc allcons) fdecls0)
+                 (map (completeBranchesInFunc allcons True) fdecls0)
   --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
   --smtfuncs <- funcs2SMT opts modsref allsyms
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
@@ -226,28 +226,6 @@ ndExpr = trExpr (\_ -> False)
                 (\_ nd bs -> nd || or bs)
                 (\_ -> id)
                 (\nd _ -> nd)
-
--- Complete all partial case branches by adding final branch `_ -> failed`.
-completeBranchesInFunc :: [[(QName,Int)]] -> FuncDecl -> FuncDecl
-completeBranchesInFunc allcons (Func qf ar vis te rule) = Func qf ar vis te $
-  case rule of External _ -> rule
-               Rule vs e  -> Rule vs (completeBranches e)
- where
-  completeBranches = trExpr Var Lit Comb FC.Let Free Or updCase Branch Typed
-   where
-    -- extend partial branches to `_ -> failed`.
-    updCase ct e brs = Case ct e $ case brs of
-      []                           -> []
-      Branch (LPattern _) _   : _  -> brs
-      Branch (Pattern qc _) _ : bs ->
-        let otherqs  = map ((\p -> (patCons p, length (patArgs p)))
-                                      . branchPattern) bs
-            siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
-                             id
-                             (getSiblingsOf allcons qc)
-        in brs ++ if null (siblings \\ otherqs)
-                    then []
-                    else [Branch (Pattern anonCons []) fcFailed]
 
 -- Replace occurrences of `Prelude.apply` and partial applications by
 -- `Prelude.failed` in an expression.

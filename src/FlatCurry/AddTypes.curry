@@ -21,7 +21,6 @@ import FlatCurry.Read     ( readFlatCurryWithImports )
 import FlatCurry.Simplify ( simpExpr )
 import FlatCurry.Types
 
-import Verify.Helpers     ( removeTopForallType )
 import Verify.ProgInfo
 
 testAddTypes :: String -> IO ()

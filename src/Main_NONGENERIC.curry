@@ -117,9 +117,10 @@ verifyModule valueanalysis pistore astore opts0 mname = do
                     return opts0 { optSMT = False }
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- getFlatProgFor pistore mname
-  let fdecls       = progFuncs flatprog
-      numfdecls    = length fdecls
-      visfuncs     = map funcName (filter ((== Public) . funcVisibility) fdecls)
+  let orgfdecls    = progFuncs flatprog
+      numfdecls    = length orgfdecls
+      visfuncs     = map funcName (filter ((== Public) . funcVisibility)
+                                          orgfdecls)
       numvisfuncs  = length visfuncs
       visfuncset   = Set.fromList visfuncs
       isVisible qf = Set.member qf visfuncset
@@ -136,6 +137,9 @@ verifyModule valueanalysis pistore astore opts0 mname = do
                   else printWhenStatus opts ""
   let modcons = allConsOfTypes (progTypes flatprog)
       allcons = modcons ++ impconss
+      -- verify function declarations with completed branches:
+      fdecls  = map (completeBranchesInFunc allcons False) orgfdecls
+      funusage = funcDecls2Usage mname fdecls
   mtime <- getModuleModTime mname
   -- infer initial abstract call types:
   mboldacalltypes <- readCallTypeFile opts mtime mname
@@ -153,7 +157,6 @@ verifyModule valueanalysis pistore astore opts0 mname = do
                             (Map.fromList acalltypes)
                             (Map.fromList (iotypes ++ impiotypes))
                             (maybe [] id mbnfconds) opts
-  let funusage = funcDecls2Usage mname fdecls
   enforceNormalForm opts "VERIFYSTATE" vstate
   printWhenAll opts $ unlines $
     ("Function usage in module '" ++ mname ++ "':") :

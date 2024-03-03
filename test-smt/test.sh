@@ -17,7 +17,7 @@ check_diff() {
     cat $DIFF
     /bin/rm -f $DIFF
     /bin/mv -f $OUTFILE LOGFILE
-    echo "Test output saved in file 'LOGFILE'."
+    echo "Test output saved in file 'LOGFILE' (to compare with '$RESULTFILE')."
     exit 1
   fi
 }

@@ -17,7 +17,7 @@ check_diff() {
     cat $DIFF
     /bin/rm -f $DIFF
     /bin/mv -f $OUTFILE LOGFILE
-    echo "Test output saved in file 'LOGFILE'."
+    echo "Test output saved in file 'LOGFILE' (to compare with '$RESULTFILE')."
     exit 1
   fi
 }
@@ -38,8 +38,6 @@ $TOOL -r -q --nosmt $TESTLIBS | tee $LOGFILE
 check_diff $LOGFILE RESULTLIBS.txt
 $TOOL -r -q --nosmt $TESTPROGS | tee $LOGFILE
 check_diff $LOGFILE RESULTEXAMPLES.txt
-
-exit
 
 # Testing depth-2 domain:
 TOOL="curry-calltypes-values2"

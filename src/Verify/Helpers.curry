@@ -70,36 +70,6 @@ getModuleModTime mname =
         (\ (_,fn) -> getModificationTime fn)
 
 ------------------------------------------------------------------------------
---- Read and transform a module in FlatCurry format.
-readTransFlatCurry :: String -> IO Prog
-readTransFlatCurry mname =
-  readFlatCurry mname >>= return . transformChoiceInProg . removeTopForallType
-
---- Replace all occurrences of `Prelude.?` in a FlatCurry program by
---- `Or` expressions.
-transformChoiceInProg :: Prog -> Prog
-transformChoiceInProg = updProg id id id (map transChoiceInFunc) id
- where
-  transChoiceInFunc = updFunc id id id id transChoiceInRule
-
-  transChoiceInRule = updRule id transChoiceInExpr id
-
-  transChoiceInExpr = updCombs updChoiceComb
-   where
-    updChoiceComb ct qf es =
-      if ct == FuncCall && qf == pre "?" && length es == 2
-        then Or (es!!0) (es!!1)
-        else Comb ct qf es
-
---- Remove the top-level `ForallType` constructors from all function signatures.
-removeTopForallType :: Prog -> Prog
-removeTopForallType = updProg id id id (map rmForallTypeInFunc) id
- where
-  rmForallTypeInFunc = updFunc id id id rmForallType id
-
-  rmForallType texp = case texp of ForallType _ te -> te
-                                   _               -> texp
-
 --- Return the pattern variables of a pattern.
 patternArgs :: Pattern -> [Int]
 patternArgs (Pattern _ vs) = vs
