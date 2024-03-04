@@ -722,13 +722,18 @@ addConjunct exp = do
 addSingleCase :: Int -> QName -> [Int] -> VerifyStateM ()
 addSingleCase casevar qc branchvars = do
   st <- get
-  let siblings = siblingsOfCons (vstConsInfos st) qc
+  let siblings    = siblingsOfCons (vstConsInfos st) qc
       catchbranch = if null siblings then []
                                      else [Branch (Pattern anonCons []) fcFalse]
   put $ st { vstCondition =
                \c -> (vstCondition st)
-                       (Case Rigid (Var casevar)
+                       (Case Rigid (idCall (Var casevar))
                           ([Branch (Pattern qc branchvars) c] ++ catchbranch)) }
+ where
+  -- This call, which wraps the case argument, is a work-around to fix
+  -- a problem with pattern matchin in algebraic data types occurring
+  -- in Z3 version 4.13.0 (see example Z3BUG/match-error.smt).
+  idCall e = Comb FuncCall (pre "id") [e]
 
 -- Adds an equality between a variable and an expression as a conjunct
 -- to the current condition.

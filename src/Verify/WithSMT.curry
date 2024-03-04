@@ -109,8 +109,10 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars
                  then []
                  else [ Comment "User-defined datatypes:" ] ++
                       map tdecl2SMT decls) ++
-              [ EmptyLine, Comment "Polymorphic sorts:" ] ++
-              map (\tv -> DeclareSort tv 0) tvarsInVars ++
+              (if null tvarsInVars
+                 then []
+                 else [ EmptyLine, Comment "Polymorphic sorts:" ] ++
+                      map (\tv -> DeclareSort tv 0) tvarsInVars) ++
               [ EmptyLine, smtfuncs, EmptyLine
               , Comment "Free variables:" ] ++
               map (\(i,s) -> DeclareVar (SV i s)) varsorts ++
@@ -559,7 +561,7 @@ primNames =
 getAllFunctions :: Options -> IORef ProgInfo -> [QName] -> IO [FuncDecl]
 getAllFunctions opts pistore newfuns = do
   mods <- fmap (map (miProg . snd) . progInfos) $ readIORef pistore
-  getAllFuncs mods [] {-preloadedFuncDecls-} newfuns
+  getAllFuncs mods preloadedFuncDecls newfuns
  where
   getAllFuncs _       currfuncs [] = return (reverse currfuncs)
   getAllFuncs allmods currfuncs (newfun:newfuncs)
@@ -603,7 +605,10 @@ loadModulesForQNames opts pistore qns = mapM_ loadMod (nub (map fst qns))
 -- for simple operations.
 preloadedFuncDecls :: [FuncDecl]
 preloadedFuncDecls =
-  [Func (pre "null") 1 Public 
+  [Func (pre "id") 1 Public 
+     (FuncType (TVar 0) (TVar 0))
+     (Rule [1] (Var 1)),
+   Func (pre "null") 1 Public 
      (FuncType (fcList (TVar 0)) fcBool)
      (Rule [1] (Case Flex (Var 1)
                   [Branch (Pattern (pre "[]") [])   fcTrue,
