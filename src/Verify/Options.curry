@@ -146,7 +146,7 @@ options =
   checkDomain s opts =
     if s `elem` ["Values", "Values2", "Values5"]
       then opts { optDomainID = s }
-      else error "Illegal domain ID, allowed values: Value|Values2|Values5"
+      else error "Illegal domain ID, allowed values: Values|Values2|Values5"
 
   sysname = curryCompiler ++ "-" ++
             intercalate "."

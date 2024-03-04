@@ -2,23 +2,26 @@
 (set-option :smt.mbqi false)
 
 ; For functional types:
-(declare-datatypes (T1 T2) ((Func (mk-func (argument T1) (result T2)))))
+(declare-datatypes ( (Func 2) )
+  ((par (T1 T2) ( (mk-func (argument T1) (result T2))))))
 
 ; Unit type:
-(declare-datatypes () ((Unit (unit))))
+(declare-datatypes ( (Unit 0) ) ( ((unit))))
 
 ; Pair type:
-(declare-datatypes (T1 T2) ((Pair (mk-pair (first T1) (second T2)))))
+(declare-datatypes ( (Pair 2) )
+  ((par (T1 T2) ( (mk-pair (first T1) (second T2)) ))))
 
 ; Maybe type:
-(declare-datatypes (T) ((Maybe (Nothing) (Just (just T)))))
+(declare-datatypes ( (Maybe 1) ) ((par (T) ( (Nothing) (Just (just T)) ))))
 
 ; Either type:
-(declare-datatypes (T1 T2) ((Either (Left (left T1)) (Right (right T2)))))
-  
+(declare-datatypes ( (Either 2) )
+  ((par (T1 T2) ( (Left (left T1)) (Right (right T2))))))
+
 ; Ordering type:
-(declare-datatypes () ((Ordering (LT) (EQ) (GT))))
+(declare-datatypes ( (Ordering 0) ) (( (LT) (EQ) (GT) )))
 
 ; Dict type (to represent dictionary variables):
-(declare-datatypes (T) ((Dict (Dict (dict T)))))
+(declare-datatypes ( (Dict 1) ) ((par (T) ( (Dict (dict T)) ))))
 

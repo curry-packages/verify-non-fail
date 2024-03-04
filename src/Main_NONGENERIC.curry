@@ -560,7 +560,7 @@ aCallType2Bool consinfos vs (Just argts) =
  where
   act2cond (v,at) = fcAnds $
     map (\ct -> if all isAnyType (argTypesOfCons ct (arityOfCons consinfos ct) at)
-                  then transTester ct (arityOfCons consinfos ct) (Var v)
+                  then transTester consinfos ct (Var v)
                   else fcFalse )
         (consOfType at)
 
@@ -722,11 +722,13 @@ addConjunct exp = do
 addSingleCase :: Int -> QName -> [Int] -> VerifyStateM ()
 addSingleCase casevar qc branchvars = do
   st <- get
+  let siblings = siblingsOfCons (vstConsInfos st) qc
+      catchbranch = if null siblings then []
+                                     else [Branch (Pattern anonCons []) fcFalse]
   put $ st { vstCondition =
                \c -> (vstCondition st)
                        (Case Rigid (Var casevar)
-                          [Branch (Pattern qc branchvars) c,
-                           Branch (Pattern anonCons []) fcFalse]) }
+                          ([Branch (Pattern qc branchvars) c] ++ catchbranch)) }
 
 -- Adds an equality between a variable and an expression as a conjunct
 -- to the current condition.
@@ -1001,16 +1003,16 @@ verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
   printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
                   snd qf ++ showArgumentVars vs ++
                   " w.r.t. call type: " ++ prettyFunCallAType atype
-  st <- get
   -- compute the precondition for this call by renaming the arguments:
   let freenfcargs = filter ((`notElem` [1..length vs]) . fst) nfcvars
   newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
   -- add renamed free variables of condition to the current set of variables
   addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
   -- rename variable in condition:
-  let rnmcvars = zip3 [1.. length vs] (repeat unknownType) (map Var vs) ++
-                 map (\(nv,(v,t)) -> (v,t,Var nv)) (zip newfvars freenfcargs)
-  let callcond = expandExpr (vstVarExp st) (expandExpr rnmcvars nfcond)
+  let rnmcvars = zip [1.. length vs] vs ++
+                 map (\(nv,(v,_)) -> (v, nv)) (zip newfvars freenfcargs)
+  st <- get
+  let callcond = expandExpr (vstVarExp st) (renameAllVars rnmcvars nfcond)
   unless (callcond == fcTrue) $ printIfVerb 2 $
     "and call condition: " ++ showSimpExp callcond
   showVarExpTypes
@@ -1100,9 +1102,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
 verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   consinfos <- getConsInfos
   let otherqs  = map ((\p -> (patCons p, length(patArgs p))) . branchPattern) bs
-      siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
-                       id
-                       (siblingsOfCons consinfos qc)
+      siblings = siblingsOfCons consinfos qc
       missingcs = siblings \\ otherqs -- constructors having no branches
   currfn <- getCurrentFuncName
   unless (null missingcs) $ do
@@ -1132,7 +1132,7 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   checkMissCons cs = do
     printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
     consinfos <- getConsInfos
-    let iscons = transTester cs (arityOfCons consinfos cs) (Var casevar)
+    let iscons = transTester consinfos cs (Var casevar)
     bcond <- getExpandedCondition
     unsat <- isUnsatisfiable (fcAnd iscons bcond)
     return $ if unsat then [] else [cs]

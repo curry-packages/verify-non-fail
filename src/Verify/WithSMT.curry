@@ -9,6 +9,7 @@ module Verify.WithSMT
  where
 
 import Control.Monad     ( unless, when )
+import Data.Either       ( partitionEithers )
 import Data.IORef
 import Data.List         ( (\\), find, init, isPrefixOf, last, maximum, nub
                          , partition, union )
@@ -18,6 +19,7 @@ import System.CPUTime    ( getCPUTime )
 import Debug.Trace
 
 import Control.Monad.Trans.State
+import Data.Tuple.Extra   ( both )
 import FlatCurry.AddTypes
 import FlatCurry.Build
 import FlatCurry.Goodies
@@ -44,10 +46,12 @@ checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef ProgInfo
           -> [(QName,ConsInfo)] -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
 checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
                              vartypes assertionexp = do
-  let qns = filter (/= anonCons) (allQNamesInExp assertionexp)
+  let (cnames,fnames) = both nub
+                             (partitionEithers (allQNamesInExp assertionexp))
+      cnamesreq = filter (`notElem` [pre "False", pre "True", anonCons]) cnames
   --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
   --putStrLn $ "NAMES IN ASSERTION: " ++ show qns
-  loadModulesForQNames opts pistore qns
+  loadModulesForQNames opts pistore (cnamesreq ++ fnames)
   pinfos <- fmap progInfos $ readIORef pistore
   let typedexp = addTypes2VarExp pinfos vartypes assertionexp fcBool
   --putStrLn $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedexp
@@ -55,7 +59,7 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
     (transExpError typedexp)
     (\ (assertion,varsorts) ->
        catch (checkUnsatWithSMT opts qf scripttitle pistore consinfos vartypes
-                                varsorts assertion)
+                                varsorts assertion cnamesreq fnames)
              (\e -> print e >> return Nothing))
     (exp2SMTWithVars Nothing (simpExpr typedexp))
  where
@@ -64,20 +68,21 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
 
 checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
                   -> [(QName,ConsInfo)] 
-                  -> [(Int,TypeExpr)] -> [(Int,Sort)] -> Term -> IO (Maybe Bool)
-checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars assertion =
+                  -> [(Int,TypeExpr)] -> [(Int,Sort)]
+                  -> Term -> [QName] -> [QName] -> IO (Maybe Bool)
+checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars
+                  assertion assertioncons assertfuncs =
   flip catch (\e -> print e >> return Nothing) $ do
-  let allsyms = nub (catMaybes
-                       (map (\n -> maybe Nothing Just (untransOpName n))
-                            (map qidName (allQIdsOfTerm assertion))))
-  unless (null allsyms) $ printWhenDetails opts $
-    "Translating operations into SMT: " ++ unwords (map showQName allsyms)
-  fdecls0 <- getAllFunctions opts pistore allsyms
+  --let allsyms = nub (catMaybes
+  --                     (map (\n -> maybe Nothing Just (untransOpName n))
+  --                          (map qidName (allQIdsOfTerm assertion))))
+  unless (null assertfuncs) $ printWhenDetails opts $
+    "Translating operations into SMT: " ++ unwords (map showQName assertfuncs)
+  fdecls0 <- getAllFunctions opts pistore assertfuncs
   pinfos <- fmap progInfos $ readIORef pistore
   let fdecls = addTypes2FuncDecls pinfos
                  (map (completeBranchesInFunc consinfos True) fdecls0)
   --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
-  --smtfuncs <- funcs2SMT opts modsref allsyms
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
                                   show (map funcName fdecls))
                        (\fds -> DefineSigsRec fds)
@@ -86,22 +91,24 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars assertion =
   --putStrLn $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
   let vartypestcons = foldr union [] (map (tconsOfTypeExpr . snd) vartypes)
       funcstcons    = foldr union [] (map (tconsOfTypeExpr . funcType) fdecls)
-      (pretypes,_ {-usertypes-}) =
-         partition ((== "Prelude") . fst) (union funcstcons vartypestcons)
-  let --decls = map (maybe (error "Internal error: some datatype not found!") id)
-      --            [] --(map (tdeclOf vst) usertypes)
-      -- collect of type parameters in order to delcare them as sorts:
-      tvarsInVars = foldr union []
+      asserttcons   = map (\(ConsType _ tc _) -> tc)
+                          (map (snd3 . infoOfCons consinfos) assertioncons)
+      (primtypes,usertypes) =
+         partition ((== "Prelude") . fst)
+                   (union funcstcons (union vartypestcons asserttcons))
+  decls <- mapM (getTypeDeclOf pistore) usertypes
+  -- collect all type parameters in order to declare them as sorts:
+  let tvarsInVars = foldr union []
                           (map (typeParamsOfSort . type2sort)
                           (map snd vartypes ++ map TVar fdecltvars))
       varsorts = map (\(i,te) -> (i, type2sort te)) vartypes ++ extravars
   --putStrLn $ "Assertion: " ++ pPrint (pretty assertion)
-  let smt   = --concatMap preludeType2SMT (map snd pretypes) ++
+  let smt   = concatMap preludeType2SMT (map snd primtypes) ++
               [ EmptyLine ] ++
-              --(if null decls
-              --   then []
-              --   else [ Comment "User-defined datatypes:" ] ++
-              --        map tdecl2SMT decls) ++
+              (if null decls
+                 then []
+                 else [ Comment "User-defined datatypes:" ] ++
+                      map tdecl2SMT decls) ++
               [ EmptyLine, Comment "Polymorphic sorts:" ] ++
               map (\tv -> DeclareSort tv 0) tvarsInVars ++
               [ EmptyLine, smtfuncs, EmptyLine
@@ -117,8 +124,8 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars assertion =
   pp <- getPackagePath
   smtprelude <- readFile (pp </> "include" </>
                   if all ((`elem` ["Int","Float","Bool", "Char", "[]"]) . snd)
-                     pretypes then "Prelude_min.smt"
-                              else "Prelude.smt")
+                     primtypes then "Prelude_min.smt"
+                               else "Prelude.smt")
   let scripttitle = unlines (map ("; "++) (lines title))
   printWhenAll opts $
     "RAW SMT SCRIPT:\n" ++ scripttitle ++ "\n\n" ++ showSMTRaw smt
@@ -143,11 +150,11 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars assertion =
   let pcvalid = let ls = lines out in not (null ls) && head ls == "unsat"
   return (if ecode>0 then Nothing else Just pcvalid)
 
--- Translate a typed variables to an SMT declaration:
+-- Translate a typed variable into an SMT declaration:
 typedVar2SMT :: (Int,TypeExpr) -> Command
 typedVar2SMT (i,te) = DeclareVar (SV i (type2sort te))
 
--- Gets all type constructors of a type expression.
+-- Gets all type constructors occurring in a type expression.
 tconsOfTypeExpr :: TypeExpr -> [QName]
 tconsOfTypeExpr (TVar _) = []
 tconsOfTypeExpr (FuncType a b) =  union (tconsOfTypeExpr a) (tconsOfTypeExpr b)
@@ -156,17 +163,22 @@ tconsOfTypeExpr (TCons qName texps) =
 tconsOfTypeExpr (ForallType _ te) =  tconsOfTypeExpr te
 
 ------------------------------------------------------------------------------
--- Get all qualified names occurring in an expression.
-allQNamesInExp :: Expr -> [QName]
+-- Get all qualified names occurring in an expression which are either
+-- constructor or defined function names.
+allQNamesInExp :: Expr -> [Either QName QName]
 allQNamesInExp e =
   trExpr (const id) (const id) comb lt fr (.) cas branch const e []
  where
-  comb _ qn exp = (qn:) . foldr (.) id exp
+  comb ct qn exp = ((classifyName ct) qn:) . foldr (.) id exp
+   where classifyName FuncCall         = Right
+         classifyName (FuncPartCall _) = Right
+         classifyName ConsCall         = Left
+         classifyName (ConsPartCall _) = Left
   lt bs exp = exp . foldr (.) id (map snd bs)
   fr _ exp = exp
   cas _ exp bs = exp . foldr (.) id bs
   branch pat exp = ((args pat)++) . exp
-  args (Pattern qc _) = [qc]
+  args (Pattern qc _) = [Left qc]
   args (LPattern _)   = []
 
 ------------------------------------------------------------------------------
@@ -188,6 +200,48 @@ showWithLineNums txt =
 --- @return the floor of the logarithm in the base 10 of `n`.
 ilog :: Int -> Int
 ilog n | n>0 = if n<10 then 0 else 1 + ilog (n `div` 10)
+
+---------------------------------------------------------------------------
+--- Translates a type declaration into an SMT datatype declaration.
+tdecl2SMT :: TypeDecl -> Command
+tdecl2SMT (TypeSyn tc _ _ _) =
+  error $ "Cannot translate type synonym '" ++ showQName tc ++ "' into SMT!"
+tdecl2SMT (TypeNew tc _ _ _) =
+  error $ "Cannot translate newtype '" ++ showQName tc ++ "' into SMT!"
+tdecl2SMT (Type tc _ tvars consdecls) =
+  DeclareDatatypes
+   [(tcons2SMT tc, length tvars,
+     DT (map (\ (v,_) -> 'T' : show v) tvars) (map tconsdecl consdecls))]
+ where
+  tconsdecl (Cons qn _ _ texps) =
+    let cname = transOpName qn
+    in DCons cname (map (texp2sel qn) (zip [1..] texps))
+
+  texp2sel cname (i,texp) = (genSelName cname i, type2sortD True texp)
+
+--- Generates the name of the i-th selector for a given constructor.
+genSelName :: QName -> Int -> String
+genSelName qc@(mn,fn) i
+ | mn == "Prelude" && take 3 fn == "(,,"
+ = transOpName qc ++ "_" ++ show i
+ | otherwise
+ = "sel" ++ show i ++ '-' : transOpName qc
+
+--- Translates a prelude type into an SMT datatype declaration,
+--- if necessary.
+preludeType2SMT :: String -> [Command]
+preludeType2SMT tn
+ | take 3 tn == "(,,"
+ = let arity = length tn -1
+   in [ Comment "Declaration of tuple type:"
+      , DeclareDatatypes
+        [(tcons2SMT (pre tn), arity,
+          DT (map (\v -> 'T' : show v) [1 .. arity])
+             [DCons (transOpName (pre tn)) (map texp2sel [1 .. arity])])]]
+ | otherwise
+ = []
+ where
+  texp2sel i = (genSelName (pre tn) i, SComb ('T' : show i) [])
 
 ---------------------------------------------------------------------------
 -- Translates a function declaration into a (possibly polymorphic)
@@ -379,14 +433,20 @@ varOfSV (SV v _) = v
 --- The types `TVar` and `Func` are defined in the SMT prelude
 --- which is always loaded.
 type2sort :: TypeExpr -> Sort
-type2sort (TVar i) = SComb --"TVar" []
-                           ("TVar" ++ show i) []
-type2sort (TCons qc targs) =
-  SComb (tcons2SMT qc) (map type2sort targs)
-type2sort (FuncType dom ran) =
-  SComb "Func" (map type2sort [dom,ran])
-type2sort (ForallType _ te) = type2sort te
-  --error "Veriy.WithSMT.type2SMT: cannot translate ForallType"
+type2sort  = type2sortD False
+
+--- Similarly as 'type2sort' but type variables are shown as `Ti`
+--- if the first argument is true, which is used when generating
+--- algebraic data tyep declarations.
+type2sortD :: Bool -> TypeExpr -> Sort
+type2sortD dt = t2s
+ where
+  t2s texp = case texp of
+    TVar i           -> SComb ((if dt then "T" else "TVar") ++ show i) []
+    TCons qc targs   -> SComb (tcons2SMT qc) (map t2s targs)
+    FuncType dom ran -> SComb "Func" (map t2s [dom,ran])
+    ForallType _ te  -> t2s te
+     --error "Veriy.WithSMT.type2SMT: cannot translate ForallType"
 
 --- Translates a FlatCurry type constructor name into SMT.
 tcons2SMT :: QName -> String

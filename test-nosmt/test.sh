@@ -1,6 +1,16 @@
 #!/bin/sh
 # Shell script to test some verification examples
 
+# Ask to proceed or exit
+proceed_exit() {
+  echo -n "Proceed? (y/n) "
+  read ANSWER
+  if [ "$ANSWER" != y ] ; then
+    echo "Script terminated"
+    exit 1
+  fi
+}
+
 # Check differences:
 check_diff() {
   OUTFILE=$1
@@ -18,7 +28,7 @@ check_diff() {
     /bin/rm -f $DIFF
     /bin/mv -f $OUTFILE LOGFILE
     echo "Test output saved in file 'LOGFILE' (to compare with '$RESULTFILE')."
-    exit 1
+    proceed_exit
   fi
 }
 
@@ -33,14 +43,14 @@ TESTPROGS="ArithDiv DataList DepthkDomain EncapSearch Equality InfLists InferCal
 # Testing standard (top constructor) domain:
 TOOL="curry-calltypes"
 
-$TOOL -q --nosmt $COMPILELIBS
+#$TOOL -q --nosmt $COMPILELIBS
 $TOOL -r -q --nosmt $TESTLIBS | tee $LOGFILE
 check_diff $LOGFILE RESULTLIBS.txt
 $TOOL -r -q --nosmt $TESTPROGS | tee $LOGFILE
 check_diff $LOGFILE RESULTEXAMPLES.txt
 
 # Testing depth-2 domain:
-TOOL="curry-calltypes-values2"
+TOOL="curry-calltypes -d Values2"
 
 $TOOL -q --nosmt $COMPILELIBS
 $TOOL -r -q --nosmt $TESTLIBS | tee $LOGFILE

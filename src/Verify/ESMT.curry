@@ -704,20 +704,12 @@ ppCmd cmd = case cmd of
   Assert   t -> [text "assert", pretty t]
   CheckSat   -> [text "check-sat"]
   DeclareVar (SV v s)  -> [text "declare-const", prettyVar v, pretty s]
-  DeclareDatatypes sds -> -- use old SMT syntax:
-    if length sds /= 1
-      then error "Datatype declaration with more than one type!"
-      else let (tc, _, DT tvs cs) = head sds
-           in [ text "declare-datatypes"
-              , parent (map text tvs)
-              , parent [parent (text tc : map pretty cs)]
-              ]
-  --DeclareDatatypes sds -> let (ss, ars, ds) = unzip3 sds in
-  --                        [ text "declare-datatypes"
-  --                        , parent (map (\ (s,a) -> parent [text s, int a])
-  --                                      (zip ss ars))
-  --                        , parent (map pretty ds)
-  --                        ]
+  DeclareDatatypes sds -> let (ss, ars, ds) = unzip3 sds in
+                          [ text "declare-datatypes"
+                          , parent (map (\ (s,a) -> parent [text s, int a])
+                                        (zip ss ars))
+                          , parent (map pretty ds)
+                          ]
   DeclareFun fn ss s -> [ text "declare-fun"
                         , text fn
                         , parent (map pretty ss)

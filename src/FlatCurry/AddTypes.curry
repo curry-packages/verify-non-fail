@@ -319,20 +319,24 @@ getCombTypeOf ct = case ct of FuncCall       -> getFuncTypeOf
 
 -- Gets the type of a qualified function name.
 getFuncTypeOf :: QName -> TransState TypeExpr
-getFuncTypeOf (mn,fn) = do
-  pi <- getProgInfoFor mn ("for function " ++ fn)
-  maybe (error $ "Function '" ++ fn ++ "' not found in state!")
-        return
-        (Map.lookup fn (miFTypes pi))
+getFuncTypeOf qc@(mn,fn)
+  | qc == pre "failed" = return (TVar 1)
+  | otherwise
+  = do pi <- getProgInfoFor mn ("for function " ++ fn)
+       maybe (error $ "Function '" ++ fn ++ "' not found in state!")
+             return
+             (Map.lookup fn (miFTypes pi))
 
 -- Gets the type of a qualified constructor name.
 getConsTypeOf :: QName -> TransState TypeExpr
-getConsTypeOf (mn,fn) = do
-  pi <- getProgInfoFor mn ("for constructor " ++ fn)
-  maybe (error $ "Constructor '" ++ fn ++ "' not found in state!")
-        (\(_,ConsType tes tc tvs,_) ->
-           return $ foldr FuncType (TCons tc (map TVar tvs)) tes)
-        (Map.lookup fn (miCInfos pi))
+getConsTypeOf qc@(mn,fn)
+  | qc `elem` map pre ["False", "True"] = return fcBool
+  | otherwise
+  = do pi <- getProgInfoFor mn ("for constructor " ++ fn)
+       maybe (error $ "Constructor '" ++ fn ++ "' not found in state!")
+             (\(_,ConsType tes tc tvs,_) ->
+               return $ foldr FuncType (TCons tc (map TVar tvs)) tes)
+             (Map.lookup fn (miCInfos pi))
 
 ------------------------------------------------------------------------------
 -- A type substitution is a mapping from type variables to type expressions.

@@ -12,7 +12,7 @@ module Verify.ProgInfo
  where
 
 import Data.IORef
-import Data.List          ( (\\) )
+import Data.List          ( (\\), find )
 
 import qualified Data.Map as Map
 import FlatCurry.Build    ( fcFailed, pre )
@@ -20,6 +20,7 @@ import FlatCurry.Files    ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Names    ( anonCons )
 import FlatCurry.Types
+import Verify.Helpers     ( fst3, trd3 )
 
 ------------------------------------------------------------------------------
 --- Read and transform a module in FlatCurry format.
@@ -63,9 +64,7 @@ completeBranchesInFunc consinfos withanon = updFuncBody (updCases completeCase)
     Branch (Pattern pc _) _ : bs -> brs ++
       let otherqs  = map ((\p -> (patCons p, length (patArgs p)))
                                     . branchPattern) bs
-          siblings = maybe (error $ "Siblings of " ++ snd pc ++ " not found!")
-                           id
-                           (siblingsOfCons consinfos pc)
+          siblings = siblingsOfCons consinfos pc
       in if withanon
            then if null (siblings \\ otherqs)
                   then []
@@ -103,32 +102,31 @@ consInfoOfTypeDecl (Type qt _ tvs cdecls) =
           filter ((/=qc) . fst) (map (\(Cons c car _ _) -> (c,car)) cdecls))))
       cdecls
 
----- Gets the arity of a constructor from information about all constructors.
-arityOfCons :: [(QName,ConsInfo)] -> QName -> Int
-arityOfCons consinfos qc@(mn,cn)
-  | null mn -- literal?
-  = 0
-  | otherwise
-  = maybe (error $ "Arity of constructor '" ++ mn ++ "." ++ cn ++ "' not found")
-          (\(ar,_,_) -> ar)
-          (lookup qc consinfos)
-
---- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
-siblingsOfCons :: [(QName,ConsInfo)] -> QName -> Maybe [(QName,Int)]
-siblingsOfCons consinfos qc =
-  maybe Nothing
-        (\(_,_,sibs) -> Just sibs)
+--- Gets the the information about a given constructor name.
+infoOfCons :: [(QName,ConsInfo)] -> QName -> ConsInfo
+infoOfCons consinfos qc@(mn,cn) =
+  maybe (error $ "No info for constructor '" ++ mn ++ "." ++ cn ++ "' found!")
+        id
         (lookup qc consinfos)
+
+--- Gets the arity of a constructor from information about all constructors.
+arityOfCons :: [(QName,ConsInfo)] -> QName -> Int
+arityOfCons consinfos qc@(mn,_)
+  | null mn   = 0 -- literal
+  | otherwise = fst3 (infoOfCons consinfos qc)
+
+--- Gets the siblings of a constructor w.r.t. constructor information.
+siblingsOfCons :: [(QName,ConsInfo)] -> QName -> [(QName,Int)]
+siblingsOfCons consinfos qc = trd3 (infoOfCons consinfos qc)
 
 --- Is a non-empty list of constructors complete, i.e., does it contain
 --- all the constructors of a type?
 --- The first argument contains information about all constructors in a program.
 isCompleteConstructorList :: [(QName,ConsInfo)] -> [QName] -> Bool
 isCompleteConstructorList _         []     = False
-isCompleteConstructorList consinfos (c:cs) =
-  maybe False
-        (\siblings -> all (`elem` cs) (map fst siblings))
-        (siblingsOfCons consinfos c)
+isCompleteConstructorList consinfos (c:cs)
+  | null (fst c) = False -- literals are never complete
+  | otherwise    = all (`elem` cs) (map fst (siblingsOfCons consinfos c))
 
 -----------------------------------------------------------------------------
 --- The global program information is a mapping from module names
@@ -188,5 +186,13 @@ getModInfoFor piref mname = do
 --- Gets the FlatCurry program for a module with a given name.
 getFlatProgFor :: IORef ProgInfo -> String -> IO Prog
 getFlatProgFor piref mn = fmap miProg $ getModInfoFor piref mn
+
+--- Gets the type declaration for a given type constructor.
+getTypeDeclOf :: IORef ProgInfo -> QName -> IO TypeDecl
+getTypeDeclOf piref qtc@(mn,_) = do
+  prog <- getFlatProgFor piref mn
+  maybe (error $ "Type declaration for '" ++ show qtc ++ "' not found!")
+        return
+        (find (\td -> typeName td == qtc) (progTypes prog))
 
 ------------------------------------------------------------------------------
