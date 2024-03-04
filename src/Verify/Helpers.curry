@@ -141,33 +141,6 @@ isFreshVarPos :: Pos -> Bool
 isFreshVarPos = null
 
 ------------------------------------------------------------------------------
---- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
-getSiblingsOf :: [[(QName,Int)]] -> QName -> Maybe [(QName,Int)]
-getSiblingsOf allcons qc =
-  maybe Nothing
-        (\qcs -> Just $ deleteBy (\x y -> fst x == fst y) (qc,0) qcs)
-        (find ((qc `elem`) . map fst) allcons)
-
---- Gets the arity of a constructor w.r.t. all constructors grouped by types.
-arityOfCons :: [[(QName,Int)]] -> QName -> Int
-arityOfCons allcons qc@(mn,cn)
-  | null mn -- literal?
-  = 0
-  | otherwise
-  = maybe (error $ "Arity of constructor '" ++ mn ++ "." ++ cn ++ "' not found")
-          id
-          (lookup qc (concat allcons))
-
---- Is a non-empty list of constructors complete, i.e., does it contain
---- all the constructors of a type?
---- The first argument contains all the constructors in a program.
-isCompleteConstructorList :: [[(QName,Int)]] -> [QName] -> Bool
-isCompleteConstructorList _       []     = False
-isCompleteConstructorList allcons (c:cs) =
-  maybe False
-        (\siblings -> all (`elem` cs) (map fst siblings))
-        (getSiblingsOf allcons c)
-
 --- Some predefined data constructors grouped by their types.
 --- Used for testing in module CallTypes.
 stdConstructors :: [[QName]]

@@ -17,6 +17,7 @@ import FlatCurry.Types
 import FlatCurry.Build     ( pre )
 import Verify.Helpers
 import Verify.Options
+import Verify.ProgInfo
 
 ------------------------------------------------------------------------------
 --- A call type is intended to specify the conditions on arguments
@@ -62,11 +63,11 @@ prettyCallTypeArgs cts = case cts of
 
 --- Simplify call types by recursively transforming each complete
 --- list of constructors with `AnyT` arguments to `AnyT`.
-simpFuncCallType :: [[(QName,Int)]] -> [[CallType]] -> [[CallType]]
-simpFuncCallType allcons ctss =
+simpFuncCallType :: [(QName,ConsInfo)] -> [[CallType]] -> [[CallType]]
+simpFuncCallType consinfos ctss =
   let ctss' = foldr addCTArgs [] (map (map simpCallType) ctss)
   in if ctss' == ctss then ctss
-                      else simpFuncCallType allcons ctss'
+                      else simpFuncCallType consinfos ctss'
  where
   simpCallType AnyT = AnyT
   simpCallType (MCons qcts) =
@@ -75,7 +76,7 @@ simpFuncCallType allcons ctss =
     complete2Any [] = MCons []
     complete2Any cs@(_:_)
       | all (== AnyT) (concatMap snd cs) && -- all arguments AnyT?
-        isCompleteConstructorList allcons (map fst cs)
+        isCompleteConstructorList consinfos (map fst cs)
       = AnyT
       | otherwise = MCons cs
 
@@ -186,15 +187,15 @@ initCallTypeState opts qf vs =
 --- (represented as a list) of alternative call types
 --- where each element in the disjunction is list of `n` call types for
 --- each argument.
-callTypeFunc :: Options -> [[(QName,Int)]] -> FuncDecl -> (QName,[[CallType]])
-callTypeFunc opts allcons (Func qf ar _ _ rule) =
+callTypeFunc :: Options -> [(QName,ConsInfo)] -> FuncDecl -> (QName,[[CallType]])
+callTypeFunc opts consinfos (Func qf ar _ _ rule) =
   maybe
     (case rule of
        External _  -> callTypeExternalFunc qf ar
        Rule vs exp ->
          if length vs /= ar
            then error $ "Func " ++ show qf ++ ": inconsistent variables"
-           else (qf, simpFuncCallType allcons
+           else (qf, simpFuncCallType consinfos
                        (callTypeExpr (initCallTypeState opts qf vs) exp)))
      (\ct -> (qf,ct))
      (lookup qf defaultCallTypes)
@@ -291,9 +292,9 @@ type ACallType a = Maybe [a]
 --- Since the abstract call type of an operation is a single list of abstract
 --- call types for the arguments so that a disjunction of argument lists
 --- cannot be expressed, the disjunctions are joined (i.e., intersected).
-funcCallType2AType :: TermDomain a => [[(QName,Int)]] -> (QName, [[CallType]])
+funcCallType2AType :: TermDomain a => [(QName,ConsInfo)] -> (QName, [[CallType]])
                    -> (QName, ACallType a)
-funcCallType2AType allcons (qn,fct) =
+funcCallType2AType consinfos (qn,fct) =
   (qn, if null fct
          then failACallType
          else foldr1 joinACallType (map callTypes2ATypes fct))
@@ -301,13 +302,13 @@ funcCallType2AType allcons (qn,fct) =
   callTypes2ATypes cts = let ats = map callType2AType cts
                          in if any isEmptyType ats
                               then Nothing
-                              else Just (map (normalizeAType allcons) ats)
+                              else Just (map (normalizeAType consinfos) ats)
 
   callType2AType AnyT       = anyType
   callType2AType (MCons cs) =
     let cats = map (\(qc,cts) -> ((qc, length cts),
                                   aCons qc (map callType2AType cts))) cs
-    in if isCompleteConstructorList allcons (map fst cs) &&
+    in if isCompleteConstructorList consinfos (map fst cs) &&
           all isAnyType -- are all abstract constructor arguments any type?
               (concatMap (\((qc,ar),aqc) -> argTypesOfCons qc ar aqc) cats)
         then anyType
@@ -318,14 +319,14 @@ funcCallType2AType allcons (qn,fct) =
 --- Note that this works only for abstract values which are depth-bounded,
 --- i.e., not for regular types. Thus, this operation might be better moved
 --- into the implementation of a particular abstract domain.
-normalizeAType :: TermDomain a => [[(QName,Int)]] -> a -> a
-normalizeAType allcons at =
+normalizeAType :: TermDomain a => [(QName,ConsInfo)] -> a -> a
+normalizeAType consinfos at =
   let cs   = consOfType at
-      cats = map (\qc -> (qc, map (normalizeAType allcons)
+      cats = map (\qc -> (qc, map (normalizeAType consinfos)
                               (argTypesOfCons qc 0 at))) cs
   in if null cs
        then at
-       else if isCompleteConstructorList allcons cs &&
+       else if isCompleteConstructorList consinfos cs &&
                all isAnyType -- are all constructor arguments any type?
                    (concatMap snd cats)
               then anyType

@@ -34,6 +34,7 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Time                  ( ClockTime )
 import Debug.Profile
+import FlatCurry.AddTypes         ( applyTSubst, splitArgTypes )
 import FlatCurry.Goodies
 import FlatCurry.Names
 import FlatCurry.NormalizeLet
@@ -68,7 +69,7 @@ import FlatCurry.Simplify         ( simpExpr )
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 03/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 04/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -124,7 +125,7 @@ verifyModule valueanalysis pistore astore opts0 mname = do
       numvisfuncs  = length visfuncs
       visfuncset   = Set.fromList visfuncs
       isVisible qf = Set.member qf visfuncset
-  imps@(impconss,impacalltypes,impnftypes,impiotypes) <-
+  imps@(impconsinfos,impacalltypes,impnftypes,impiotypes) <-
     if optImports opts
       then do
         whenStatus opts $ putStr $ "Reading abstract types of imports: " ++
@@ -135,23 +136,23 @@ verifyModule valueanalysis pistore astore opts0 mname = do
   if optTime opts then do whenStatus opts $ putStr "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
                   else printWhenStatus opts ""
-  let modcons = allConsOfTypes (progTypes flatprog)
-      allcons = modcons ++ impconss
+  let modconsinfos = consInfoOfTypeDecls (progTypes flatprog)
+      consinfos = modconsinfos ++ impconsinfos
       -- verify function declarations with completed branches:
-      fdecls  = map (completeBranchesInFunc allcons False) orgfdecls
+      fdecls  = map (completeBranchesInFunc consinfos False) orgfdecls
       funusage = funcDecls2Usage mname fdecls
   mtime <- getModuleModTime mname
   -- infer initial abstract call types:
   mboldacalltypes <- readCallTypeFile opts mtime mname
   (acalltypes, numntacalltypes, numpubacalltypes) <- id $!!  
-    inferCallTypes opts allcons isVisible mname mtime flatprog mboldacalltypes
+    inferCallTypes opts consinfos isVisible mname mtime flatprog mboldacalltypes
   -- infer in/out types:
   (iotypes, numntiotypes, numpubntiotypes) <- id $!!
     inferIOTypes opts valueanalysis astore isVisible flatprog
   -- read previously inferred non-fail conditions:
   mbnfconds <- readNonFailCondFile opts mtime mname
 
-  vstate <- initVerifyState pistore flatprog allcons
+  vstate <- initVerifyState pistore flatprog consinfos
                             (Map.fromList impacalltypes)
                             (Map.fromList impnftypes)
                             (Map.fromList acalltypes)
@@ -192,7 +193,7 @@ verifyModule valueanalysis pistore astore opts0 mname = do
                             (map fst (vstFunConds vst)) (vstStats vst)
   when (optStats opts) $ putStr stattxt
   when withverify $ do
-    storeTypes opts mname fdecls modcons finalacalltypes
+    storeTypes opts mname fdecls modconsinfos finalacalltypes
       (filter (isVisible .fst) finalntacalltypes) (vstFunConds vst) iotypes
     storeStatistics opts mname stattxt statcsv
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
@@ -201,14 +202,15 @@ verifyModule valueanalysis pistore astore opts0 mname = do
 --- return them together with the number of all/public non-trivial call types.
 --- The last argument are the already stored old call types, if they are
 --- up to date.
-inferCallTypes :: Options -> [[(QName,Int)]] -> (QName -> Bool)
+inferCallTypes :: Options -> [(QName,ConsInfo)] -> (QName -> Bool)
                -> String -> ClockTime -> Prog -> Maybe [(QName,ACallType)]
                -> IO ([(QName, ACallType)], Int, Int)
-inferCallTypes opts allcons isVisible mname mtime flatprog mboldacalltypes = do
-  oldpubcalltypes <- readPublicCallTypeModule opts allcons mtime mname
+inferCallTypes opts consinfos isVisible mname mtime flatprog
+               mboldacalltypes = do
+  oldpubcalltypes <- readPublicCallTypeModule opts consinfos mtime mname
   let fdecls       = progFuncs flatprog
   let calltypes    = unionBy (\x y -> fst x == fst y) oldpubcalltypes
-                             (map (callTypeFunc opts allcons) fdecls)
+                             (map (callTypeFunc opts consinfos) fdecls)
       ntcalltypes  = filter (not . isTotalCallType . snd) calltypes
       pubcalltypes = filter (isVisible . fst) ntcalltypes
   if optVerb opts > 2
@@ -221,9 +223,9 @@ inferCallTypes opts allcons isVisible mname mtime flatprog mboldacalltypes = do
         showFunResults prettyFunCallTypes
          (sortFunResults (if optPublic opts then pubcalltypes else ntcalltypes))
 
-  let pubmodacalltypes = map (funcCallType2AType allcons) oldpubcalltypes
+  let pubmodacalltypes = map (funcCallType2AType consinfos) oldpubcalltypes
       acalltypes = unionBy (\x y -> fst x == fst y) pubmodacalltypes
-                           (maybe (map (funcCallType2AType allcons) calltypes)
+                           (maybe (map (funcCallType2AType consinfos) calltypes)
                                   id
                                   mboldacalltypes)
       ntacalltypes  = filter (not . isTotalACallType . snd) acalltypes
@@ -406,7 +408,7 @@ data VerifyState = VerifyState
   { vstModules     :: IORef ProgInfo    -- all infos about loaded modules
   , vstCurrModule  :: String            -- name of the current module
   , vstCurrFunc    :: (QName,Int,[Int]) -- name/arity/args of current function
-  , vstAllCons     :: [[(QName,Int)]]   -- all constructors grouped by types
+  , vstConsInfos   :: [(QName,ConsInfo)]-- infos about all constructors
   , vstFreshVar    :: Int               -- fresh variable index in a rule
   , vstVarExp      :: [(Int,TypeExpr,Expr)] -- map variable to its type and
                                             -- subexpression
@@ -426,18 +428,18 @@ data VerifyState = VerifyState
   }
 
 --- Initializes the verification state.
-initVerifyState :: IORef ProgInfo -> Prog -> [[(QName,Int)]]
+initVerifyState :: IORef ProgInfo -> Prog -> [(QName,ConsInfo)]
                 -> Map.Map QName ACallType -> Map.Map QName NonFailCond
                 -> Map.Map QName ACallType
                 -> Map.Map QName InOutType
                 -> [(QName,NonFailCond)] -> Options
                 -> IO VerifyState
-initVerifyState pistore flatprog allcons impacalltypes impfconds acalltypes
+initVerifyState pistore flatprog consinfos impacalltypes impfconds acalltypes
                 iotypes nfconds opts = do
   unless (null nonfailconds) $ printWhenIntermediate opts $
     "INITIAL NON-FAIL CONDITIONS:\n" ++
     showConditions (progFuncs flatprog) nonfailconds
-  return $ VerifyState pistore (progName flatprog) (("",""),0,[]) allcons 0
+  return $ VerifyState pistore (progName flatprog) (("",""),0,[]) consinfos 0
                        [] [] id impacalltypes nfacalltypes iotypes [] [] []
                        impfconds nonfailconds [] (0,0) opts
  where
@@ -470,9 +472,9 @@ getCurrentFuncName = do
   st <- get
   return $ let (qf,_,_) = vstCurrFunc st in qf
 
--- Gets all constructors grouped by types.
-getAllCons :: VerifyStateM [[(QName,Int)]]
-getAllCons = get >>= return . vstAllCons
+-- Gets information about all constructors.
+getConsInfos :: VerifyStateM [(QName,ConsInfo)]
+getConsInfos = get >>= return . vstConsInfos
 
 -- Sets the fresh variable index in the state.
 setFreshVarIndex :: Int -> VerifyStateM ()
@@ -517,7 +519,7 @@ addConditionRestriction qf cond = do
     oldcalltype <- getCallType qf 0
     let totaloldct = isTotalACallType oldcalltype
         -- express oldcalltype as a condition to be added to `cond`:
-        oldcalltypecond = aCallType2Bool (vstAllCons st) vs oldcalltype
+        oldcalltypecond = aCallType2Bool (vstConsInfos st) vs oldcalltype
     bcond <- getExpandedCondition
     let newcond = fcAnd oldcalltypecond
                     (if cond == fcTrue
@@ -549,16 +551,16 @@ setNewFunCondition qf newcond = do
 
 --- Tries to generate a Boolean condition from an abstract call type,
 --- if possible.
-aCallType2Bool :: [[(QName,Int)]] -> [Int] -> ACallType -> Expr
+aCallType2Bool :: [(QName,ConsInfo)] -> [Int] -> ACallType -> Expr
 aCallType2Bool _       _  Nothing      = fcFalse
-aCallType2Bool allcons vs (Just argts) =
+aCallType2Bool consinfos vs (Just argts) =
   if all isAnyType argts
     then fcTrue
     else fcAnds (map act2cond (zip vs argts))
  where
   act2cond (v,at) = fcAnds $
-    map (\ct -> if all isAnyType (argTypesOfCons ct (arityOfCons allcons ct) at)
-                  then transTester ct (arityOfCons allcons ct) (Var v)
+    map (\ct -> if all isAnyType (argTypesOfCons ct (arityOfCons consinfos ct) at)
+                  then transTester ct (arityOfCons consinfos ct) (Var v)
                   else fcFalse )
         (consOfType at)
 
@@ -1096,11 +1098,11 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
     showVarExpTypes
     addMissingCase exp []
 verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
-  allcons <- getAllCons
+  consinfos <- getConsInfos
   let otherqs  = map ((\p -> (patCons p, length(patArgs p))) . branchPattern) bs
       siblings = maybe (error $ "Siblings of " ++ snd qc ++ " not found!")
                        id
-                       (getSiblingsOf allcons qc)
+                       (siblingsOfCons consinfos qc)
       missingcs = siblings \\ otherqs -- constructors having no branches
   currfn <- getCurrentFuncName
   unless (null missingcs) $ do
@@ -1129,8 +1131,8 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
   -- check whether a constructor is excluded by the current call condition:
   checkMissCons cs = do
     printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
-    allcons <- getAllCons
-    let iscons = transTester cs (arityOfCons allcons cs) (Var casevar)
+    consinfos <- getConsInfos
+    let iscons = transTester cs (arityOfCons consinfos cs) (Var casevar)
     bcond <- getExpandedCondition
     unsat <- isUnsatisfiable (fcAnd iscons bcond)
     return $ if unsat then [] else [cs]
@@ -1168,8 +1170,12 @@ verifyBranch casevar ve (Branch (LPattern l) e) = do
 verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   bstate <- getBranchState
   ves  <- getVarExps
+  consinfos <- getConsInfos
   let vet = maybe unknownType snd3 (find ((== casevar) . fst3) ves)
-  addVarExps (map (\ (v,vt) -> (v, vt, Var v)) (zip vs (patArgTypes vet)))
+  addVarExps (map (\ (v,vt) -> (v, vt, Var v))
+                  (zip vs (if vet == unknownType
+                             then repeat unknownType
+                             else patArgTypes consinfos vet)))
   vts  <- getVarTypes
   let pattype        = aCons qc (anyTypes (length vs))
       branchvartypes = simplifyVarTypes (bindVarInIOTypes casevar pattype vts)
@@ -1188,20 +1194,30 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
             iots <- verifyVarExpr ve e
             restoreBranchState bstate
             return iots
- where -- TODO: COMPUTE TYPES FOR OTHER CONSTRUCTORS!!
-  patArgTypes pt
+ where
+  -- compute the argument types from the result type `pt` of the branch variable
+  -- where some regularly occurring constructors are directly implemented
+  patArgTypes consinfos pt
     | qc == pre ":"
     = case pt of TCons tc [et] | tc == pre "[]" -> [et, pt]
-                 _                              -> repeat unknownType
+                 _                              -> noPatTypeErr
     | qc == pre "(,)"
     = case pt of TCons tc [t1,t2] | tc == pre "(,)" -> [t1,t2]
-                 _                                  -> repeat unknownType
+                 _                                  -> noPatTypeErr
     | qc == pre "Just"
     = case pt of TCons tc [t] | tc == pre "Maybe" -> [t]
-                 _                                -> repeat unknownType
+                 _                                -> noPatTypeErr
     | otherwise
-    = error $
-        "verifyBranch: cannot compute pattern argument types for " ++ snd qc
+    = maybe (error $ "Info about constructor '" ++ snd qc ++ "' not found!")
+            (\(_,ConsType tes tc tvs,_) ->
+              case pt of
+                TCons dtc ats | tc == dtc -> map (applyTSubst (zip tvs ats)) tes
+                _                         -> noPatTypeErr
+            )
+            (lookup qc consinfos)
+
+  noPatTypeErr = error $
+    "verifyBranch: cannot compute pattern argument types for " ++ snd qc
 
 -- Gets the abstract type of a variable w.r.t. a set of variable types.
 getVarType :: Int -> VarTypesMap -> AType
@@ -1275,9 +1291,9 @@ isUnsatisfiable bexp = do
       unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
         "WARNING in operation '" ++ snd fname ++
         "': missing variables in unsatisfiability check!"
-      allcons <- getAllCons
+      consinfos <- getConsInfos
       answer <- lift $ checkUnsatisfiabilityWithSMT (vstToolOpts st)
-                         fname question (vstModules st) allcons vtypes bexp
+                         fname question (vstModules st) consinfos vtypes bexp
       return (maybe False id answer)
     else return False
 

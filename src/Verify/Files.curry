@@ -7,7 +7,7 @@
 --- is usually `~/.curry_verifycache/<CURRYSYSTEM>/...`.
 ---
 --- @author Michael Hanus
---- @version January 2024
+--- @version March 2024
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -47,6 +47,7 @@ import Verify.Helpers
 import Verify.IOTypes
 import Verify.NonFailConditions
 import Verify.Options
+import Verify.ProgInfo
 
 ------------------------------------------------------------------------------
 -- Definition of directory and file names for various data.
@@ -112,9 +113,9 @@ getNonFailCondFile opts mname = getVerifyCacheBaseFile opts mname "NONFAIL"
 getIOTypesFile :: Options -> String -> IO String
 getIOTypesFile opts mname = getVerifyCacheBaseFile opts mname "IOTYPES"
 
--- Gets the name of the file containing all constructor of a module.
-getConsTypesFile :: Options -> String -> IO String
-getConsTypesFile opts mname = getVerifyCacheBaseFile opts mname "CONSTYPES"
+-- Gets the name of the file containing all constructor information of a module.
+getConsInfosFile :: Options -> String -> IO String
+getConsInfosFile opts mname = getVerifyCacheBaseFile opts mname "CONSINFOS"
 
 -- The name of the Curry module where the call type specifications are stored.
 callTypesModule :: String -> String
@@ -126,22 +127,22 @@ callTypesModule mname = mname ++ "_CALLSPEC"
 storeTypes :: TermDomain a => Options
            -> String                 -- module name
            -> [FuncDecl]             -- functions of the module
-           -> [[(QName,Int)]]        -- all constructors grouped by type
+           -> [(QName,ConsInfo)]     -- information about all constructors
            -> [(QName,ACallType a)]  -- all inferred abstract call types
            -> [(QName,ACallType a)]  -- public non-trivial abstract call types
            -> [(QName,NonFailCond)]  -- inferred non-fail conditions
            -> [(QName,InOutType a)]  -- all input output types
            -> IO ()
-storeTypes opts mname fdecls allcons acalltypes pubntcalltypes funconds
+storeTypes opts mname fdecls consinfos acalltypes pubntcalltypes funconds
            iotypes = do
   patfile <- getVerifyCacheBaseFile opts mname "..."
   printWhenAll opts $ "Caching analysis results at '" ++ patfile ++ "'"
   createDirectoryIfMissing True (dropFileName patfile)
-  csfile  <- getConsTypesFile   opts mname
+  cifile  <- getConsInfosFile   opts mname
   ctfile  <- getCallTypesFile   opts mname
   nffile  <- getNonFailCondFile opts mname
   iofile  <- getIOTypesFile     opts mname
-  writeFileAndReport csfile (show allcons)
+  writeFileAndReport cifile (show consinfos)
   writeFileAndReport ctfile
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
   writeFileAndReport nffile
@@ -164,26 +165,26 @@ storeTypes opts mname fdecls allcons acalltypes pubntcalltypes funconds
 -- If the data files do not exist or are older than the source of the
 -- module, `Nothing` is returned.
 tryReadTypes :: TermDomain a => Options -> String
-  -> IO (Maybe ([[(QName,Int)]], [(QName,ACallType a)],
+  -> IO (Maybe ([(QName,ConsInfo)], [(QName,ACallType a)],
                  [(QName,NonFailCond)], [(QName,InOutType a)]))
 tryReadTypes opts mname = do
-  csfile   <- getConsTypesFile   opts mname
+  cifile   <- getConsInfosFile   opts mname
   ctfile   <- getCallTypesFile   opts mname
   nffile   <- getNonFailCondFile opts mname
   iofile   <- getIOTypesFile     opts mname
-  csexists <- doesFileExist csfile
+  ciexists <- doesFileExist cifile
   ctexists <- doesFileExist ctfile
   nfexists <- doesFileExist nffile
   ioexists <- doesFileExist iofile
-  if not (csexists && ctexists && ioexists && nfexists)
+  if not (ciexists && ctexists && ioexists && nfexists)
     then return Nothing
     else do
       srctime <- getModuleModTime mname
-      cstime  <- getModificationTime csfile
+      citime  <- getModificationTime cifile
       cttime  <- getModificationTime ctfile
       nftime  <- getModificationTime nffile
       iotime  <- getModificationTime iofile
-      if compareClockTime cstime srctime == GT &&
+      if compareClockTime citime srctime == GT &&
          compareClockTime cttime srctime == GT &&
          compareClockTime nftime srctime == GT &&
          compareClockTime iotime srctime == GT
@@ -193,18 +194,18 @@ tryReadTypes opts mname = do
 -- Reads constructors, abstract call types, and input/output types
 -- for a given module.
 readTypes :: TermDomain a => Options -> String
-          -> IO ([[(QName,Int)]], [(QName,ACallType a)],
+          -> IO ([(QName,ConsInfo)], [(QName,ACallType a)],
                  [(QName,NonFailCond)], [(QName,InOutType a)])
 readTypes opts mname = do
-  csfile <- getConsTypesFile   opts mname
+  cifile <- getConsInfosFile   opts mname
   ctfile <- getCallTypesFile   opts mname
   nffile <- getNonFailCondFile opts mname
   iofile <- getIOTypesFile     opts mname
-  conss  <- readFile csfile >>= return . read
+  consis <- readFile cifile >>= return . read
   cts    <- readFile ctfile >>= return . map read . lines
   nfcs   <- readFile nffile >>= return . map read . lines
   iots   <- readFile iofile >>= return . map read . lines
-  return (conss,
+  return (consis,
           map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
           map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs,
           map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots)
@@ -216,10 +217,10 @@ readTypes opts mname = do
 --- is applied before reading the files.
 readTypesOfModules :: TermDomain a => Options
   -> (Options -> String -> IO ()) -> [String]
-  -> IO ([[(QName,Int)]], [(QName, ACallType a)],
+  -> IO ([(QName,ConsInfo)], [(QName, ACallType a)],
          [(QName,NonFailCond)], [(QName, InOutType a)])
 readTypesOfModules opts computetypes mnames = do
-  (xs,ys,zs, ws) <- mapM tryRead mnames >>= return . unzip4
+  (xs,ys,zs,ws) <- mapM tryRead mnames >>= return . unzip4
   return (concat xs, concat ys, concat zs, concat ws)
  where
   tryRead mname =
@@ -233,7 +234,7 @@ readTypesOfModules opts computetypes mnames = do
                       return)
           return
 
---- Transforms a list of triples into a triple of lists.
+--- Transforms a list of quadruples into a quadruple of lists.
 unzip4 :: [(a, b, c, d)] -> ([a], [b], [c], [d])
 unzip4 []             = ([], [], [], [])
 unzip4 ((x, y, z, w) : ts) = (x : xs, y : ys, z : zs, w : ws)
@@ -288,9 +289,9 @@ readNonFailCondFile opts mtimesrc mname = do
 --- `_CALLTYPES`.
 --- If the file does not exist, try to read a file from the `include`
 --- directory (for standard libraries).
-readPublicCallTypeModule :: Options -> [[(QName,Int)]] -> ClockTime -> String
+readPublicCallTypeModule :: Options -> [(QName,ConsInfo)] -> ClockTime -> String
                          -> IO [(QName,[[CallType]])]
-readPublicCallTypeModule opts allcons mtimesrc mname = do
+readPublicCallTypeModule opts consinfos mtimesrc mname = do
   let specmname = callTypesModule mname
   specfile <- lookupModuleSourceInLoadPath specmname >>= return . maybe "" snd
   existsf <- doesFileExist specfile
@@ -301,7 +302,7 @@ readPublicCallTypeModule opts allcons mtimesrc mname = do
         then do
           printWhenStatus opts $
             "Reading required call types from '" ++ specfile ++ "'..."
-          readCallTypeSpecMod allcons mname specmname
+          readCallTypeSpecMod consinfos mname specmname
         else do
           printWhenStatus opts $
            "Ignoring call type specifications in '" ++ specfile ++ "' (too old)"
@@ -318,7 +319,7 @@ readPublicCallTypeModule opts allcons mtimesrc mname = do
           "Reading required call types from '" ++ ifname ++ "'..."
         curdir <- getCurrentDirectory
         setCurrentDirectory $ pkgpath </> "include"
-        result <- readCallTypeSpecMod allcons mname ctmname
+        result <- readCallTypeSpecMod consinfos mname ctmname
         setCurrentDirectory curdir
         return result
       else return []
@@ -327,27 +328,29 @@ readPublicCallTypeModule opts allcons mtimesrc mname = do
 --- Reads a call type specification file for a module
 --- if it is up-to-date (where the modification time of the module
 --- is passed as the second argument).
-readCallTypeSpecMod :: [[(QName,Int)]] -> String -> String
+readCallTypeSpecMod :: [(QName,ConsInfo)] -> String -> String
                     -> IO [(QName,[[CallType]])]
-readCallTypeSpecMod allcons mname specmname = do
+readCallTypeSpecMod consinfos mname specmname = do
   smod <- readCurry specmname
-  return (map (fromSpecFunc allcons mname) (filter isSpecFunc (functions smod)))
+  return $ map (fromSpecFunc consinfos mname)
+               (filter isSpecFunc (functions smod))
  where
   isSpecFunc fd = "'calltype" `isSuffixOf` snd (funcName fd)
 
-maybeCons2CallTypes :: [[(QName,Int)]] -> [[Maybe [String]]]
+maybeCons2CallTypes :: [(QName,ConsInfo)] -> [[Maybe [String]]]
                     -> [[CallType]]
-maybeCons2CallTypes allcons cts = map (map mb2ct) cts
+maybeCons2CallTypes consinfos cts = map (map mb2ct) cts
  where
   mb2ct Nothing       = AnyT
   mb2ct (Just cscts)  = MCons $ map (mb2cs . readQC) cscts
    where
-    mb2cs qc = (qc, take (arityOfCons allcons qc) (repeat AnyT))
+    mb2cs qc = (qc, take (arityOfCons consinfos qc) (repeat AnyT))
 
-fromSpecFunc :: [[(QName,Int)]] -> String -> CFuncDecl -> (QName, [[CallType]])
-fromSpecFunc allcons mname fdecl =
+fromSpecFunc :: [(QName,ConsInfo)] -> String -> CFuncDecl
+             -> (QName, [[CallType]])
+fromSpecFunc consinfos mname fdecl =
   ((mname,fname),
-   maybeCons2CallTypes allcons $ rules2calltype (funcRules fdecl))
+   maybeCons2CallTypes consinfos $ rules2calltype (funcRules fdecl))
  where
   fname = fromSpecName (decodeContractName (snd (funcName fdecl)))
 

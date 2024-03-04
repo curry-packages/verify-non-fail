@@ -41,8 +41,8 @@ import PackageConfig      ( getPackagePath )
 -- If the implication is `False`, the unsatisfiability of the assertion
 -- is checked.
 checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef ProgInfo
-          -> [[(QName,Int)]] -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
-checkUnsatisfiabilityWithSMT opts qf scripttitle pistore allcons
+          -> [(QName,ConsInfo)] -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
+checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
                              vartypes assertionexp = do
   let qns = filter (/= anonCons) (allQNamesInExp assertionexp)
   --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
@@ -54,7 +54,7 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore allcons
   maybe
     (transExpError typedexp)
     (\ (assertion,varsorts) ->
-       catch (checkUnsatWithSMT opts qf scripttitle pistore allcons vartypes
+       catch (checkUnsatWithSMT opts qf scripttitle pistore consinfos vartypes
                                 varsorts assertion)
              (\e -> print e >> return Nothing))
     (exp2SMTWithVars Nothing (simpExpr typedexp))
@@ -63,9 +63,9 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore allcons
                        return Nothing
 
 checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
-                  -> [[(QName,Int)]] 
+                  -> [(QName,ConsInfo)] 
                   -> [(Int,TypeExpr)] -> [(Int,Sort)] -> Term -> IO (Maybe Bool)
-checkUnsatWithSMT opts qf title pistore allcons vartypes extravars assertion =
+checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars assertion =
   flip catch (\e -> print e >> return Nothing) $ do
   let allsyms = nub (catMaybes
                        (map (\n -> maybe Nothing Just (untransOpName n))
@@ -75,7 +75,7 @@ checkUnsatWithSMT opts qf title pistore allcons vartypes extravars assertion =
   fdecls0 <- getAllFunctions opts pistore allsyms
   pinfos <- fmap progInfos $ readIORef pistore
   let fdecls = addTypes2FuncDecls pinfos
-                 (map (completeBranchesInFunc allcons True) fdecls0)
+                 (map (completeBranchesInFunc consinfos True) fdecls0)
   --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
   --smtfuncs <- funcs2SMT opts modsref allsyms
   let smtfuncs = maybe (Comment $ "ERROR translating " ++

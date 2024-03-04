@@ -21,8 +21,6 @@ import FlatCurry.Goodies
 import FlatCurry.Names    ( anonCons )
 import FlatCurry.Types
 
-import Verify.Helpers     ( allConsOfTypes, getSiblingsOf )
-
 ------------------------------------------------------------------------------
 --- Read and transform a module in FlatCurry format.
 --- In particular, occurrences of `Prelude.?` are transformed into
@@ -56,8 +54,8 @@ removeTopForallType = updProgFuncs (map rmForallTypeInFunc)
 --- constructors grouped by their data type. If the second argument is `True`,
 --- only a single branch with an anonymous pattern is added (if necessary),
 --- otherwise branches for all missing patterns are added.
-completeBranchesInFunc :: [[(QName,Int)]] -> Bool -> FuncDecl -> FuncDecl
-completeBranchesInFunc allcons withanon = updFuncBody (updCases completeCase)
+completeBranchesInFunc :: [(QName,ConsInfo)] -> Bool -> FuncDecl -> FuncDecl
+completeBranchesInFunc consinfos withanon = updFuncBody (updCases completeCase)
  where
   completeCase ct e brs = Case ct e $ case brs of
     []                           -> []
@@ -67,7 +65,7 @@ completeBranchesInFunc allcons withanon = updFuncBody (updCases completeCase)
                                     . branchPattern) bs
           siblings = maybe (error $ "Siblings of " ++ snd pc ++ " not found!")
                            id
-                           (getSiblingsOf allcons pc)
+                           (siblingsOfCons consinfos pc)
       in if withanon
            then if null (siblings \\ otherqs)
                   then []
@@ -77,6 +75,62 @@ completeBranchesInFunc allcons withanon = updFuncBody (updCases completeCase)
                     (siblings \\ otherqs)
 
 ------------------------------------------------------------------------------
+--- The information about a constructor consists of the arity, type, and
+--- the siblings of the constructor. The siblings are represented as
+--- pairs of the qualified constructor name and their arity.
+type ConsInfo = (Int, ConsType, [(QName,Int)])
+
+--- The type of a constructor consists of the argument types, the
+--- type constructor and the type parameters of the constructor.
+data ConsType = ConsType [TypeExpr] QName [Int]
+ deriving (Show, Read)
+
+--- Transforms a list of type declarations into constructor information.
+consInfoOfTypeDecls :: [TypeDecl] -> [(QName,ConsInfo)]
+consInfoOfTypeDecls = concatMap consInfoOfTypeDecl
+
+--- Transforms a type declaration into constructor information.
+consInfoOfTypeDecl :: TypeDecl -> [(QName,ConsInfo)]
+consInfoOfTypeDecl (TypeSyn _ _ _ _)                    = []
+consInfoOfTypeDecl (TypeNew nt _ tvs (NewCons qc _ te)) =
+  [(qc, (1, ConsType [te] nt (map fst tvs), []))]
+consInfoOfTypeDecl (Type qt _ tvs cdecls) =
+  map (\(Cons qc ar _ texps) ->
+        (qc,
+         (ar,
+          ConsType texps qt (map fst tvs),
+          --foldr FuncType (TCons qt (map (TVar . fst) tvs)) texps,
+          filter ((/=qc) . fst) (map (\(Cons c car _ _) -> (c,car)) cdecls))))
+      cdecls
+
+---- Gets the arity of a constructor from information about all constructors.
+arityOfCons :: [(QName,ConsInfo)] -> QName -> Int
+arityOfCons consinfos qc@(mn,cn)
+  | null mn -- literal?
+  = 0
+  | otherwise
+  = maybe (error $ "Arity of constructor '" ++ mn ++ "." ++ cn ++ "' not found")
+          (\(ar,_,_) -> ar)
+          (lookup qc consinfos)
+
+--- Gets the siblings of a constructor w.r.t. all constructors grouped by types.
+siblingsOfCons :: [(QName,ConsInfo)] -> QName -> Maybe [(QName,Int)]
+siblingsOfCons consinfos qc =
+  maybe Nothing
+        (\(_,_,sibs) -> Just sibs)
+        (lookup qc consinfos)
+
+--- Is a non-empty list of constructors complete, i.e., does it contain
+--- all the constructors of a type?
+--- The first argument contains information about all constructors in a program.
+isCompleteConstructorList :: [(QName,ConsInfo)] -> [QName] -> Bool
+isCompleteConstructorList _         []     = False
+isCompleteConstructorList consinfos (c:cs) =
+  maybe False
+        (\siblings -> all (`elem` cs) (map fst siblings))
+        (siblingsOfCons consinfos c)
+
+-----------------------------------------------------------------------------
 --- The global program information is a mapping from module names
 --- to infos about the module. The main program keeps an `IORef` to this
 --- structure.
@@ -93,24 +147,17 @@ emptyProgInfo = ProgInfo []
 data ModInfo = ModInfo
   { miProg    :: Prog
   , miFTypes  :: Map.Map String TypeExpr
-  , miCTypes  :: Map.Map String TypeExpr
+  , miCInfos  :: Map.Map String ConsInfo
   }
 
 -- Generates a `ProgInfo` entry for a given FlatCurry program.
 prog2ModInfo :: Prog -> ModInfo
 prog2ModInfo prog =
-  ModInfo prog (Map.fromList (map fun2sig (progFuncs prog)))
-               (Map.fromList (concatMap type2ctypes (progTypes prog)))
- where
-  fun2sig fd = (snd (funcName fd), funcType fd)
-
-  type2ctypes (TypeSyn _ _ _ _)                    = []
-  type2ctypes (TypeNew nt _ tvs (NewCons qc _ te)) =
-    [(snd qc, FuncType te (TCons nt (map (TVar . fst) tvs)))]
-  type2ctypes (Type qt _ tvs cdecls) =
-    map (\(Cons qc _ _ texps) ->
-             (snd qc, foldr FuncType (TCons qt (map (TVar . fst) tvs)) texps))
-        cdecls
+  ModInfo prog 
+          (Map.fromList (map (\fd -> (snd (funcName fd), funcType fd))
+                             (progFuncs prog)))
+          (Map.fromList (map (\(qc, cinfo) -> (snd qc, cinfo))
+                             (consInfoOfTypeDecls (progTypes prog))))
 
 ------------------------------------------------------------------------------
 -- Access operations

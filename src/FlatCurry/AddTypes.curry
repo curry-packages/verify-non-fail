@@ -34,17 +34,18 @@ testAddTypesWithProgs mname progs = do
   putStrLn $ showFlatProg (evalState (addTypes2Module mname) st)
 
 addTypes2FuncDecls :: [(String,ModInfo)] -> [FuncDecl] -> [FuncDecl]
-addTypes2FuncDecls progs fdecls =
-  let st = transInfoFrom progs defaultAddTypeOptsPoly
+addTypes2FuncDecls modinfos fdecls =
+  let st = transInfoFrom modinfos defaultAddTypeOptsPoly
   in evalState (mapM addTypes2Func fdecls) st
 
 -- Transform a FlatCurry expression w.r.t. a given list of typed variables
 -- (occurring freely in the expression) by adding type information, i.e.,
 -- transform variables and combinations into `Typed` expressions.
 -- The last argument is the expected result type of the expression.
-addTypes2VarExp :: [(String,ModInfo)] -> [(Int,TypeExpr)] -> Expr -> TypeExpr -> Expr
-addTypes2VarExp progs vartypes exp rtype =
-  let st = transInfoFrom progs defaultAddTypeOptsPoly
+addTypes2VarExp :: [(String,ModInfo)] -> [(Int,TypeExpr)] -> Expr -> TypeExpr
+                -> Expr
+addTypes2VarExp modinfos vartypes exp rtype =
+  let st = transInfoFrom modinfos defaultAddTypeOptsPoly
   in evalState (addTypes2Rule vartypes exp rtype) st { currExp = showExp exp }
 
 ------------------------------------------------------------------------------
@@ -281,7 +282,8 @@ addTypes2Expr = addTypes
   litType (Floatc _) = fcFloat
   litType (Charc  _) = fcChar
 
---- Splits a possibly functional type into types of arguments and result.
+--- Splits a possibly functional type into types of arguments and result
+--- w.r.t. a given arity.
 splitArgTypes :: Int -> TypeExpr -> ([TypeExpr],TypeExpr)
 splitArgTypes ar te
   | ar == 0
@@ -328,8 +330,9 @@ getConsTypeOf :: QName -> TransState TypeExpr
 getConsTypeOf (mn,fn) = do
   pi <- getProgInfoFor mn ("for constructor " ++ fn)
   maybe (error $ "Constructor '" ++ fn ++ "' not found in state!")
-        return
-        (Map.lookup fn (miCTypes pi))
+        (\(_,ConsType tes tc tvs,_) ->
+           return $ foldr FuncType (TCons tc (map TVar tvs)) tes)
+        (Map.lookup fn (miCInfos pi))
 
 ------------------------------------------------------------------------------
 -- A type substitution is a mapping from type variables to type expressions.
