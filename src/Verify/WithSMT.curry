@@ -9,7 +9,7 @@ module Verify.WithSMT
  where
 
 import Control.Monad     ( unless, when )
-import Data.Either       ( partitionEithers )
+import Data.Either       ( partitionEithers, rights )
 import Data.IORef
 import Data.List         ( (\\), find, init, isPrefixOf, last, maximum, nub
                          , partition, union )
@@ -50,18 +50,22 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
                              (partitionEithers (allQNamesInExp assertionexp))
       cnamesreq = filter (`notElem` [pre "False", pre "True", anonCons]) cnames
   --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
-  --putStrLn $ "NAMES IN ASSERTION: " ++ show qns
+  --putStrLn $ "NAMES IN ASSERTION: " ++ show (cnamesreq ++ fnames)
   loadModulesForQNames opts pistore (cnamesreq ++ fnames)
   pinfos <- fmap progInfos $ readIORef pistore
-  let typedexp = addTypes2VarExp pinfos vartypes assertionexp fcBool
-  --putStrLn $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedexp
+  let typedassertion = addTypes2VarExp pinfos vartypes assertionexp fcBool
+  --putStrLn $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedassertion
+  let foassertexp   = replaceHigherOrderInExp (simpExpr typedassertion)
+      foassertfuncs = rights (allQNamesInExp foassertexp)
+  --putStrLn $ "SIMPLE TYPED ASSERTION EXPRESSION: " ++ showExp foassertexp
   maybe
-    (transExpError typedexp)
+    (transExpError typedassertion)
     (\ (assertion,varsorts) ->
        catch (checkUnsatWithSMT opts qf scripttitle pistore consinfos vartypes
-                                varsorts assertion cnamesreq fnames)
+                                varsorts assertion cnamesreq foassertfuncs)
              (\e -> print e >> return Nothing))
-    (exp2SMTWithVars Nothing (simpExpr typedexp))
+    (exp2SMTWithVars (maximum (0 : map fst vartypes))
+                     Nothing foassertexp)
  where
   transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
@@ -70,8 +74,11 @@ checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
                   -> [(QName,ConsInfo)] 
                   -> [(Int,TypeExpr)] -> [(Int,Sort)]
                   -> Term -> [QName] -> [QName] -> IO (Maybe Bool)
-checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars
-                  assertion assertioncons assertfuncs =
+checkUnsatWithSMT opts qf title pistore consinfos vartypes
+                  extravars      -- variables representing h.o. subexps
+                  assertion      -- assertion to be checked
+                  assertioncons  -- constructors occurring in the assertion
+                  assertfuncs =  -- defined functions occurring in assertion
   flip catch (\e -> print e >> return Nothing) $ do
   --let allsyms = nub (catMaybes
   --                     (map (\n -> maybe Nothing Just (untransOpName n))
@@ -80,8 +87,11 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars
     "Translating operations into SMT: " ++ unwords (map showQName assertfuncs)
   fdecls0 <- getAllFunctions opts pistore assertfuncs
   pinfos <- fmap progInfos $ readIORef pistore
-  let fdecls = addTypes2FuncDecls pinfos
+  let fdecls1 = addTypes2FuncDecls pinfos
                  (map (completeBranchesInFunc consinfos True) fdecls0)
+      -- reduce to functions reachable from assertion after eliminating h.o.:
+      fdecls  = usedFunctions assertfuncs
+                  (map (updFuncBody replaceHigherOrderInExp) fdecls1)
   --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
                                   show (map funcName fdecls))
@@ -89,6 +99,7 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes extravars
                        (mapM fun2SMT fdecls)
       fdecltvars = nub (concatMap allTVarsInFuncDecl fdecls)
   --putStrLn $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
+  --let title1 = title ++ "\nTRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
   let vartypestcons = foldr union [] (map (tconsOfTypeExpr . snd) vartypes)
       funcstcons    = foldr union [] (map (tconsOfTypeExpr . funcType) fdecls)
       asserttcons   = map (\(ConsType _ tc _) -> tc)
@@ -262,13 +273,14 @@ fun2SMT (Func qn _ _ texp rule) = do
   rule2SMT (Rule vs exp) = do
     let isnd = ndExpr exp
         lhs  = tComb (transOpName qn) (map TSVar vs)
-    (rhs,varsorts) <- exp2SMTWithVars (if isnd then Just lhs else Nothing)
+    (rhs,varsorts) <- exp2SMTWithVars (maximum (0:vs))
+                                      (if isnd then Just lhs else Nothing)
                                       (simpExpr exp)
     return $
       Forall (map (\ (v,t) -> SV v (type2sort t))
-                  (funcType2TypedVars vs texp) ++
-              map (\ (v,s) -> SV v s) varsorts)
-             (if isnd then rhs else tEqu lhs rhs)
+                  (funcType2TypedVars vs texp))
+             (Exists (map (\ (v,s) -> SV v s) varsorts)
+                     (if isnd then rhs else tEqu lhs rhs))
 
 --- Returns `True` if the expression is non-deterministic,
 --- i.e., if `Or` or `Free` occurs in the expression.
@@ -283,10 +295,13 @@ ndExpr = trExpr (\_ -> False)
                 (\_ -> id)
                 (\nd _ -> nd)
 
--- Replace occurrences of `Prelude.apply` and partial applications by
--- `Prelude.failed` in an expression.
-elimApplyPartialInExp :: Expr -> Expr
-elimApplyPartialInExp =
+-- Replace higher-order features, like occurrences of `Prelude.apply` and
+-- partial applications, by `Prelude.failed` in an expression since they
+-- cannot be handled by SMT. Later, occurrences of `Prelude.failed` in
+-- SMT terms are replaced by fresh variables so that they are unspecified
+-- values.
+replaceHigherOrderInExp :: Expr -> Expr
+replaceHigherOrderInExp =
   trExpr Var Lit updComb FC.Let Free Or Case Branch Typed
  where
   updComb ct qn args = case ct of
@@ -296,16 +311,17 @@ elimApplyPartialInExp =
     _              -> Comb ct qn args
 
 -- Translates a (Boolean) FlatCurry expression into an SMT expression.
--- If the first argument is an SMT expression, an equation between
+-- If the second argument is an SMT expression, an equation between
 -- this expression and the translated result expression is generated.
 -- This is useful to axiomatize non-deterministic operations.
 -- If successful, the translated SMT expression together with new variables
 -- (which are replacements for higher-order applications) are returned.
-exp2SMTWithVars :: Maybe Term -> Expr -> Maybe (Term, [(Int,Sort)])
-exp2SMTWithVars lhs exp =
+-- The first argument is the maximum index of already used variables.
+exp2SMTWithVars :: Int -> Maybe Term -> Expr -> Maybe (Term, [(Int,Sort)])
+exp2SMTWithVars maxusedvar lhs exp =
   maybe Nothing
-        (\t -> Just $ elimApply t)
-        (exp2SMT lhs (elimApplyPartialInExp exp))
+        (\t -> Just $ elimFailed maxusedvar t)
+        (exp2SMT lhs (replaceHigherOrderInExp exp))
 
 -- Translates a (Boolean) FlatCurry expression into an SMT expression.
 -- If the first argument is an SMT expression, an equation between
@@ -381,15 +397,16 @@ data TransApplyState = TransApplyState
 type TAState a = State TransApplyState a
 
 -- Transforms a term by replacing occurrences of
--- `Prelude_apply` with new fresh variables.
-elimApply :: Term -> (Term, [(Int,Sort)])
-elimApply trm =
-  let st0 = TransApplyState (maximum (0 : allVarsInTerm trm) + 1) []
-      (ntrm,st1) = runState (elimAppyInTerm trm) st0
+-- `Prelude_failed` with new fresh variables.
+-- The first argument is the maximum index of already used variables.
+elimFailed :: Int -> Term -> (Term, [(Int,Sort)])
+elimFailed maxusedvar trm =
+  let st0 = TransApplyState (maximum (maxusedvar : allVarsInTerm trm) + 1) []
+      (ntrm,st1) = runState (elimFailedInTerm trm) st0
   in (ntrm, reverse (tsNewVars st1))
 
-elimAppyInTerm :: Term -> TAState Term
-elimAppyInTerm t = case t of
+elimFailedInTerm :: Term -> TAState Term
+elimFailedInTerm t = case t of
   TConst _      -> return t
   TSVar _       -> return t
   TComb (As n srt) [] | n == "Prelude_failed"
@@ -399,14 +416,14 @@ elimAppyInTerm t = case t of
           put st { tsFreshVarIndex = tsFreshVarIndex st + 1
                  , tsNewVars = fvt : tsNewVars st }
           return (TSVar fv)
-  TComb qid ts  -> mapM elimAppyInTerm ts >>= return . TComb qid
-  SMT.Let bs bt -> do trbs <- mapM (elimAppyInTerm . snd) bs
-                      trbt <- elimAppyInTerm bt
+  TComb qid ts  -> mapM elimFailedInTerm ts >>= return . TComb qid
+  SMT.Let bs bt -> do trbs <- mapM (elimFailedInTerm . snd) bs
+                      trbt <- elimFailedInTerm bt
                       return $ SMT.Let (zip (map fst bs) trbs) trbt
-  Forall vs te  -> elimAppyInTerm te >>= return . Forall vs
-  Exists vs te  -> elimAppyInTerm te >>= return . Exists vs
-  Match mt brs  -> do trmt <- elimAppyInTerm mt
-                      trbs <- mapM (elimAppyInTerm . snd) brs
+  Forall vs te  -> elimFailedInTerm te >>= return . Forall vs
+  Exists vs te  -> elimFailedInTerm te >>= return . Exists vs
+  Match mt brs  -> do trmt <- elimFailedInTerm mt
+                      trbs <- mapM (elimFailedInTerm . snd) brs
                       return $ Match trmt (zip (map fst brs) trbs)
                        
 -- All variables occurring in a SMT term.
@@ -588,6 +605,18 @@ getAllFunctions opts pistore newfuns = do
          newmod <- fmap miProg $ getModInfoFor pistore mname
          getAllFuncs (newmod : allmods) currfuncs (newfun:newfuncs)
 
+--- Removes from a list of function declarations the functions not used
+--- by an initial list of function names.
+--- It is assumed that the list of functions is already sorted by
+--- dependencies (ealier functions might call later ones).
+usedFunctions :: [QName] -> [FuncDecl] -> [FuncDecl]
+usedFunctions _ [] = []
+usedFunctions usedfns (fdecl : fdecls)
+  | funcName fdecl `elem` usedfns
+  = fdecl : usedFunctions (union (funcsOfFuncDecl fdecl) usedfns) fdecls
+  | otherwise
+  = usedFunctions usedfns fdecls
+
 --- Extract all user-defined FlatCurry functions that might be called
 --- by a given list of function names provided as the last argument.
 --- The second argument is an `IORef` to the currently loaded modules.
@@ -608,6 +637,11 @@ preloadedFuncDecls =
   [Func (pre "id") 1 Public 
      (FuncType (TVar 0) (TVar 0))
      (Rule [1] (Var 1)),
+   Func (pre  "not") 1  Public 
+     (FuncType fcBool fcBool)
+     (Rule  [1] (Case Flex (Var 1)
+                  [Branch (Pattern (pre "True") [] ) fcFalse,
+                   Branch (Pattern (pre "False") []) fcTrue])),
    Func (pre "null") 1 Public 
      (FuncType (fcList (TVar 0)) fcBool)
      (Rule [1] (Case Flex (Var 1)

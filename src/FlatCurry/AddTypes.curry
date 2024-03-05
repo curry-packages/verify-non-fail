@@ -39,7 +39,7 @@ addTypes2FuncDecls modinfos fdecls =
   in evalState (mapM addTypes2Func fdecls) st
 
 -- Transform a FlatCurry expression w.r.t. a given list of typed variables
--- (occurring freely in the expression) by adding type information, i.e.,
+-- (occurring freely in the expression) by adding type information, e.g.,
 -- transform variables and combinations into `Typed` expressions.
 -- The last argument is the expected result type of the expression.
 addTypes2VarExp :: [(String,ModInfo)] -> [(Int,TypeExpr)] -> Expr -> TypeExpr
@@ -225,8 +225,9 @@ addTypes2Expr = addTypes
                           typedExp optAddVarType exp te
     Lit  lit        -> do unifyTypes (litType lit) te
                           typedExp optAddLitType exp te
-    Comb FuncCall qf [e1,e2] | qf == pre "==" -- special handling of `==`
-      -> do tv <- newFreshTVar                -- as introduced in assertions
+    Comb FuncCall qf [e1,e2] | qf `elem` map pre ["==", ">="]
+      -- special handling of primitive operations as introduced in assertions
+      -> do tv <- newFreshTVar    
             targs <- mapM (addTypes (TVar tv)) [e1, e2]
             typedExp optAddCombType (Comb FuncCall qf targs) fcBool
     Comb ct qf args -> do qfte <- getCombTypeOf ct qf >>= freshTypeVariant
@@ -322,7 +323,7 @@ getFuncTypeOf :: QName -> TransState TypeExpr
 getFuncTypeOf qc@(mn,fn)
   | qc == pre "failed" = return (TVar 1)
   | otherwise
-  = do pi <- getProgInfoFor mn ("for function " ++ fn)
+  = do pi <- getProgInfoFor mn ("function " ++ fn)
        maybe (error $ "Function '" ++ fn ++ "' not found in state!")
              return
              (Map.lookup fn (miFTypes pi))
@@ -331,8 +332,11 @@ getFuncTypeOf qc@(mn,fn)
 getConsTypeOf :: QName -> TransState TypeExpr
 getConsTypeOf qc@(mn,fn)
   | qc `elem` map pre ["False", "True"] = return fcBool
+  | qc == pre "[]" = return $ fcList (TVar 0)
+  | qc == pre ":"  = return $ FuncType (TVar 0) (FuncType (fcList (TVar 0))
+                                                          (fcList (TVar 0)))
   | otherwise
-  = do pi <- getProgInfoFor mn ("for constructor " ++ fn)
+  = do pi <- getProgInfoFor mn ("constructor " ++ fn)
        maybe (error $ "Constructor '" ++ fn ++ "' not found in state!")
              (\(_,ConsType tes tc tvs,_) ->
                return $ foldr FuncType (TCons tc (map TVar tvs)) tes)
@@ -352,7 +356,7 @@ applyTSubst ts texp = case texp of
 
 -- Apply a type substitution to all types occurring in an expression.
 applyTSubst2Exp :: TSubst -> Expr -> Expr
-applyTSubst2Exp ts exp = updTypeds (\e te -> Typed e (applyTSubst ts te)) exp
+applyTSubst2Exp ts = updTypeds (\e te -> Typed e (applyTSubst ts te))
 
 ------------------------------------------------------------------------------
 -- Get all type variables occurring in a function declaration.

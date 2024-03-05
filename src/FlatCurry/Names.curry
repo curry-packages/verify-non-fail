@@ -33,6 +33,7 @@ preludePrimOps = unaryPrimOps ++ binaryPrimOps ++
 unaryPrimOps :: [(String,String)]
 unaryPrimOps =
   [("_impl#negate#Prelude.Num#Prelude.Int","-")
+  ,("_impl#sqrt#Prelude.Floating#Prelude.Float","sqrt")
   ,("not","not")
   ]
 

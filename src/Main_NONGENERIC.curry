@@ -69,7 +69,7 @@ import FlatCurry.Simplify         ( simpExpr )
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 04/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 05/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -1072,6 +1072,15 @@ checkDivOpNonZero exp cont = case exp of
                  verifyNonTrivFuncCall exp qf [v1,v2] failACallType
                    ([(v2, fcInt)], nfcond)
                  cont
+  Comb FuncCall ap1 [ Comb FuncCall qf [], arg] -- check for sqrt call
+    | ap1 == apply && qf == pre "_impl#sqrt#Prelude.Floating#Prelude.Float"
+    -> if isNonNegLit arg
+         then return []
+         else do v <- verifyExpr True arg
+                 let nfcond = Comb FuncCall (pre ">=") [Var v, Lit (Floatc 0.0)]
+                 verifyNonTrivFuncCall exp qf [v] failACallType
+                   ([(v, fcFloat)], nfcond)
+                 cont
   _ -> cont
  where
   isNonZero e = case e of
@@ -1079,6 +1088,10 @@ checkDivOpNonZero exp cont = case exp of
     Comb FuncCall ap [ Comb FuncCall fromint _ , nexp] 
       -> ap == apply && fromint == pre "fromInt" && isNonZero nexp -- fromInt ..
     _            -> False
+
+  isNonNegLit e = case e of
+    Lit (Floatc f) -> f >= 0  -- a non-negative literal
+    _              -> False
 
   apply = pre "apply"
 
