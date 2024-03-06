@@ -69,7 +69,7 @@ import FlatCurry.Simplify         ( simpExpr )
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 05/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 06/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -1301,11 +1301,12 @@ isUnsatisfiable bexp = do
   st <- get
   if optSMT (vstToolOpts st)
     then do
+      fname  <- getCurrentFuncName
       vts <- fmap (map (\(v,te,_) -> (v,te))) getVarExps
       let allvs    = allFreeVars bexp
       let vtypes   = filter ((`elem` allvs) . fst) vts
-          question = "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE?"
-      fname  <- getCurrentFuncName
+          question = "Verifying function " ++ snd fname ++ ":\n\n" ++
+                     "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE?"
       unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
         "WARNING in operation '" ++ snd fname ++
         "': missing variables in unsatisfiability check!"

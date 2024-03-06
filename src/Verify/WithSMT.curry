@@ -2,7 +2,7 @@
 --- Some operations to translate FlatCurry operations into SMT assertions.
 ---
 --- @author  Michael Hanus
---- @version January 2024
+--- @version March 2024
 ---------------------------------------------------------------------------
 
 module Verify.WithSMT
@@ -136,32 +136,36 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
   --putStrLn $ "SMT commands as Curry term:\n" ++ show smt
   pp <- getPackagePath
   smtprelude <- readFile (pp </> "include" </>
-                  if all ((`elem` ["Int","Float","Bool", "Char", "[]"]) . snd)
-                     primtypes then "Prelude_min.smt"
-                               else "Prelude.smt")
+                          if all ((`elem` defaultSMTTypes) . snd) primtypes
+                            then "Prelude_min.smt"
+                            else "Prelude.smt")
   let scripttitle = unlines (map ("; "++) (lines title))
   printWhenAll opts $
     "RAW SMT SCRIPT:\n" ++ scripttitle ++ "\n\n" ++ showSMTRaw smt
   let smtinput = scripttitle ++ "\n" ++ smtprelude ++ showSMT smt
   printWhenDetails opts $ "SMT SCRIPT:\n" ++ showWithLineNums smtinput
   let z3opts = ["-smt2", "-T:2"]
-  when (optStoreSMT opts) $ do
-    ctime <- getCPUTime
-    let outfile = "SMT-" ++ transOpName qf ++ "-" ++ show ctime ++ ".smt"
-        execcmt = "; Run with: z3 " ++ unwords z3opts ++ " " ++ outfile ++ "\n\n"
-    writeFile outfile (execcmt ++ smtinput)
+  when (optStoreSMT opts) $ storeSMT "SMT-" z3opts smtinput
   printWhenDetails opts $
     "CALLING Z3 (with options: " ++ unwords z3opts ++ ")..."
   (ecode,out,err) <- evalCmd "z3" ("-in" : z3opts) smtinput
   when (ecode > 0) $ do
     printWhenStatus opts $ "EXIT CODE: " ++ show ecode
-    writeFile "error.smt" smtinput
+    storeSMT "smterror-" z3opts smtinput
     when (optVerb opts < 3) $ printWhenStatus opts $
       "ERROR in SMT script (saved in 'error.smt'):\n" ++ out ++ "\n" ++ err
   printWhenDetails opts $ "RESULT:\n" ++ out
   unless (null err) $ printWhenDetails opts $ "ERROR:\n" ++ err
   let pcvalid = let ls = lines out in not (null ls) && head ls == "unsat"
   return (if ecode>0 then Nothing else Just pcvalid)
+ where
+  defaultSMTTypes = ["Int","Float","Bool", "Char", "[]"]
+
+  storeSMT fileprefix z3opts script = do
+    ctime <- getCPUTime
+    let outfile = fileprefix ++ transOpName qf ++ "-" ++ show ctime ++ ".smt"
+        execcmt = unwords $ ["; Run with: z3"] ++ z3opts ++ [outfile]
+    writeFile outfile (execcmt ++ "\n\n" ++ script)
 
 -- Translate a typed variable into an SMT declaration:
 typedVar2SMT :: (Int,TypeExpr) -> Command
