@@ -6,7 +6,7 @@ fac n | n == 0 = 1
 fac5 :: Int -> Int -> Int
 fac5 x n = fac (n+5)
 
-facNeg n | n>0 = fac n
+facNeg n | n > 0     = fac n
          | otherwise = gt3 n
 
 gt3 :: Int -> Int

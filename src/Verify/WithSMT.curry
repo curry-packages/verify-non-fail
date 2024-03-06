@@ -45,8 +45,9 @@ import PackageConfig      ( getPackagePath )
 checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef ProgInfo
           -> [(QName,ConsInfo)] -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
 checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
-                             vartypes assertionexp = do
-  let (cnames,fnames) = both nub
+                             vartypes assertionexp0 = do
+  let assertionexp = wrapCaseWithId assertionexp0
+      (cnames,fnames) = both nub
                              (partitionEithers (allQNamesInExp assertionexp))
       cnamesreq = filter (`notElem` [pre "False", pre "True", anonCons]) cnames
   --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
@@ -69,6 +70,14 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
  where
   transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
+
+  -- Wrap all case arguments with the identity operation.
+  -- This is a work-around to fix a problem with pattern matching
+  -- w.r.t. algebraic data types occurring in Z3 version 4.13.0
+  -- (see example Z3BUG/match-error.smt).
+  wrapCaseWithId =
+    updCases (\ct e brs -> Case ct (Comb FuncCall (pre "id") [e]) brs)
+
 
 checkUnsatWithSMT :: Options -> QName -> String -> IORef ProgInfo
                   -> [(QName,ConsInfo)] 

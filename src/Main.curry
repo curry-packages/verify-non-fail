@@ -497,7 +497,7 @@ addCallTypeRestriction qf ctype = do
                                              [(qf,newct)] (vstNewFailed st) })
         (lookup qf (vstNewFailed st))
 
--- Adds the condition (provided as the second argument as a FlatCurry
+-- Adds a new condition (provided as the second argument as a FlatCurry
 -- expression) to the call condition for the current function (first argument)
 -- so that it will be used in the next iteration.
 -- If there is already a new refined call condition, they will be combined.
@@ -515,12 +515,13 @@ addConditionRestriction qf cond = do
     let totaloldct = isTotalACallType oldcalltype
         -- express oldcalltype as a condition to be added to `cond`:
         oldcalltypecond = aCallType2Bool (vstConsInfos st) vs oldcalltype
-    bcond <- getExpandedCondition
+    branchcond <- getExpandedCondition
+    newbranchcond <- getExpandedConditionWithConj cond
     let newcond = fcAnd oldcalltypecond
                     (if cond == fcTrue
-                       then fcNot bcond
-                       else -- the current branch condition implies the condition:
-                            fcOr (fcNot bcond) cond)
+                       then fcNot branchcond
+                       else -- current branch condition implies new condition:
+                            fcOr (fcNot branchcond) newbranchcond)
     printIfVerb 2 $ "New call condition for function '" ++ snd qf ++ "': " ++
                     showSimpExp newcond ++
                  (if totaloldct then "" else " (due to non-trivial call type)")
@@ -722,13 +723,8 @@ addSingleCase casevar qc branchvars = do
                                      else [Branch (Pattern anonCons []) fcFalse]
   put $ st { vstCondition =
                \c -> (vstCondition st)
-                       (Case Rigid (idCall (Var casevar))
+                       (Case Rigid (Var casevar)
                           ([Branch (Pattern qc branchvars) c] ++ catchbranch)) }
- where
-  -- This call, which wraps the case argument, is a work-around to fix
-  -- a problem with pattern matchin in algebraic data types occurring
-  -- in Z3 version 4.13.0 (see example Z3BUG/match-error.smt).
-  idCall e = Comb FuncCall (pre "id") [e]
 
 -- Adds an equality between a variable and an expression as a conjunct
 -- to the current condition.
@@ -1002,7 +998,7 @@ verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
   currfn <- getCurrentFuncName
   printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
                   snd qf ++ showArgumentVars vs ++
-                  " w.r.t. call type: " ++ prettyFunCallAType atype
+                  "\n  w.r.t. call type: " ++ prettyFunCallAType atype
   -- compute the precondition for this call by renaming the arguments:
   let freenfcargs = filter ((`notElem` [1..length vs]) . fst) nfcvars
   newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
@@ -1014,11 +1010,11 @@ verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
   st <- get
   let callcond = expandExpr (vstVarExp st) (renameAllVars rnmcvars nfcond)
   unless (callcond == fcTrue) $ printIfVerb 2 $
-    "and call condition: " ++ showSimpExp callcond
+    "  and call condition: " ++ showSimpExp callcond
   showVarExpTypes
-  allvts <- getVarTypes
-  printIfVerb 3 $ "Current variable types:\n" ++ showVarTypes allvts
-  let svts = simplifyVarTypes allvts
+  --allvts <- getVarTypes
+  --printIfVerb 3 $ "Current variable types:\n" ++ showVarTypes allvts
+  svts <- fmap simplifyVarTypes getVarTypes
   printIfVerb 3 $ "Simplified variable types:\n" ++ showVarTypes svts
   let vts = map (\v -> (v, getVarType v svts)) vs
   printIfVerb 2 $ "Variable types in this call: " ++ printVATypes vts

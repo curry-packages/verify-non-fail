@@ -32,7 +32,7 @@ fac5'nonfail v1 v2 = ((v2 + 5) == 0) || ((v2 + 5) > 0)
 
 -- Non-fail condition of operation `facNeg`:
 facNeg'nonfail :: Int -> Bool
-facNeg'nonfail v1 = (v1 > 0) || (v1 > 3)
+facNeg'nonfail v1 = (v1 > 0) || ((not (v1 > 0)) && (v1 > 3))
 
 MODULE 'FacIO' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 
@@ -76,9 +76,9 @@ NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
 -- Non-fail condition of operation `nth`:
 nth'nonfail :: [a] -> Int -> Bool
-nth'nonfail v1 v2 = ((not (null v1)) && (case (id v1) of
+nth'nonfail v1 v2 = ((not (null v1)) && (case v1 of
     v3 : v4 -> (v2 == 0) || (not (v2 > 0))
-    _ -> True)) && ((not (null v1)) && (case (id v1) of
+    _ -> True)) && ((not (null v1)) && (case v1 of
     v3 : v4 -> (v2 == 0) || (v2 > 0)
     _ -> True))
 
@@ -88,7 +88,7 @@ NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
 -- Non-fail condition of operation `nth`:
 nth'nonfail :: [a] -> Int -> Bool
-nth'nonfail v1 v2 = (not (null v1)) && (case (id v1) of
+nth'nonfail v1 v2 = (not (null v1)) && (case v1 of
     v3 : v4 -> v2 == 0
     _ -> True)
 
@@ -117,7 +117,7 @@ NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
 -- Non-fail condition of operation `headpos`:
 headpos'nonfail :: [Int] -> Bool
-headpos'nonfail v1 = (not (null v1)) && (case (id v1) of
+headpos'nonfail v1 = (not (null v1)) && (case v1 of
     v2 : v3 -> v2 > 0
     _ -> True)
 
@@ -139,7 +139,7 @@ useTriple'nonfail v1 = v1 > 0
 
 -- Non-fail condition of operation `fTriple`:
 fTriple'nonfail :: (Int,Int,Int) -> Bool
-fTriple'nonfail v1 = case (id v1) of
+fTriple'nonfail v1 = case v1 of
     (v2,v3,v4) -> ((v2 + v3) + v4) > 0
 
 -- Non-fail condition of operation `usePair`:
@@ -148,6 +148,20 @@ usePair'nonfail v1 = v1 > 0
 
 -- Non-fail condition of operation `fPair`:
 fPair'nonfail :: Pair Int Int -> Bool
-fPair'nonfail v1 = case (id v1) of
+fPair'nonfail v1 = case v1 of
     MkPair v2 v3 -> (v2 + v3) > 0
+
+MODULE 'CaseCond' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+
+NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
+
+-- Non-fail condition of operation `pos`:
+pos'nonfail :: Int -> Bool
+pos'nonfail v1 = v1 > 0
+
+-- Non-fail condition of operation `sumPos`:
+sumPos'nonfail :: (Int,Int) -> Bool
+sumPos'nonfail v1 = (case v1 of
+    (v2,v3) -> False) || (case v1 of
+    (v2,v3) -> v3 > 0)
 
