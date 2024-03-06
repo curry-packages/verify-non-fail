@@ -7,7 +7,7 @@
 --- SMT-LIB language specified in the package `smtlib`.
 ---
 --- @author  Michael Hanus
---- @version February 2024
+--- @version March 2024
 ------------------------------------------------------------------------------
 
 module Verify.ESMT where
@@ -312,7 +312,7 @@ matchSorts []       (_:_)    = Nothing
 matchSorts (_:_)    []       = Nothing
 matchSorts (t1:ts1) (t2:ts2) = do
   s <- matchSort t1 t2
-  t <- matchSorts (map (substSort s) ts1)(map (substSort s) ts2)
+  t <- matchSorts (map (substSort s) ts1) ts2
   return (FM.union s t)
 
 --- Applies a sort substitution to a sort.
@@ -323,13 +323,15 @@ substSort sub (SComb sn ss) =
 --- Applies a sort substitution to a term.
 substTerm :: TPSubst -> Term -> Term
 substTerm sub term = case term of
-  TConst _ -> term
-  TSVar  _ -> term
-  TComb f args -> TComb (substQId sub f) (map (substTerm sub) args)
+  TConst _       -> term
+  TSVar  _       -> term
+  TComb f args   -> TComb (substQId sub f) (map (substTerm sub) args)
   Forall svs arg -> Forall (map (substSV sub) svs) (substTerm sub arg)
   Exists svs arg -> Exists (map (substSV sub) svs) (substTerm sub arg)
-  Let bs e -> Let (map (\ (v,s) -> (v, substTerm sub s)) bs) (substTerm sub e)
-  Match e ps -> Match (substTerm sub e) (map (\(v,s) -> (v, substTerm sub s)) ps)
+  Let bs e       -> Let (map (\ (v,s) -> (v, substTerm sub s)) bs)
+                        (substTerm sub e)
+  Match e ps     -> Match (substTerm sub e)
+                          (map (\(v,s) -> (v, substTerm sub s)) ps)
 
 substQId :: TPSubst -> QIdent -> QIdent
 substQId _ qid@(Id _) = qid
