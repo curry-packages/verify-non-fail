@@ -49,7 +49,8 @@ import System.Path                ( fileInPath )
 import System.Process             ( exitWith, system )
 
 -- Imports from package modules:
-import FlatCurry.Build            ( pre, fcTrue )
+import FlatCurry.Build
+import FlatCurry.Simplify         ( simpExpr )
 import Verify.CallTypes
 import Verify.Domain
 import Verify.Files
@@ -60,10 +61,6 @@ import Verify.Options
 import Verify.ProgInfo
 import Verify.Statistics
 import Verify.WithSMT
-
-import FlatCurry.Build hiding ( pre )
-import FlatCurry.Simplify         ( simpExpr )
-
 
 ------------------------------------------------------------------------------
 banner :: String
@@ -1058,36 +1055,42 @@ checkDivOpNonZero :: Expr -> VerifyStateM VarTypesMap -> VerifyStateM VarTypesMa
 checkDivOpNonZero exp cont = case exp of
   Comb FuncCall ap1 [ Comb FuncCall ap2 [Comb FuncCall qf _, arg1], arg2]
     | ap1 == apply && ap2 == apply && qf `elem` divops
-    -> if isNonZero arg2
-         then do verifyExpr True arg1
-                 return []
-         else do v1 <- verifyExpr True arg1
-                 v2 <- verifyExpr True arg2
-                 let nfcond = fcNot (Comb FuncCall (pre "==")
-                                          [Var v2, Lit (Intc 0)])
-                 verifyNonTrivFuncCall exp qf [v1,v2] failACallType
-                   ([(v2, fcInt)], nfcond)
-                 cont
+    -> case intValue arg2 of
+         Just i  -> do unless (i /= 0) $ addFailedFunc exp Nothing fcFalse
+                       verifyExpr True arg1
+                       return []
+         Nothing -> do v1 <- verifyExpr True arg1
+                       v2 <- verifyExpr True arg2
+                       let nfcond = fcNot (Comb FuncCall (pre "==")
+                                                 [Var v2, Lit (Intc 0)])
+                       verifyNonTrivFuncCall exp qf [v1,v2] failACallType
+                         ([(v2, fcInt)], nfcond)
+                       cont
   Comb FuncCall ap1 [ Comb FuncCall qf [], arg] -- check for sqrt call
     | ap1 == apply && qf == pre "_impl#sqrt#Prelude.Floating#Prelude.Float"
-    -> if isNonNegLit arg
-         then return []
-         else do v <- verifyExpr True arg
-                 let nfcond = Comb FuncCall (pre ">=") [Var v, Lit (Floatc 0.0)]
-                 verifyNonTrivFuncCall exp qf [v] failACallType
-                   ([(v, fcFloat)], nfcond)
-                 cont
+    -> case floatValue arg of
+         Just x  -> do unless (x >= 0) $ addFailedFunc exp Nothing fcFalse
+                       return []
+         Nothing -> do v <- verifyExpr True arg
+                       let nfcond = Comb FuncCall (pre ">=")
+                                         [Var v, Lit (Floatc 0.0)]
+                       verifyNonTrivFuncCall exp qf [v] failACallType
+                         ([(v, fcFloat)], nfcond)
+                       cont
   _ -> cont
  where
-  isNonZero e = case e of
-    Lit (Intc i) -> i /= 0  -- a non-zero literal
+  intValue e = case e of
+    Lit (Intc i) -> Just i
     Comb FuncCall ap [ Comb FuncCall fromint _ , nexp] 
-      -> ap == apply && fromint == pre "fromInt" && isNonZero nexp -- fromInt ..
-    _            -> False
+      | ap == apply && fromint == pre "fromInt" -> intValue nexp
+    _            -> Nothing
 
-  isNonNegLit e = case e of
-    Lit (Floatc f) -> f >= 0  -- a non-negative literal
-    _              -> False
+  floatValue e = case e of
+    Lit (Floatc f) -> Just f
+    Comb FuncCall negFloat [fexp]
+      | negFloat == pre "_impl#negate#Prelude.Num#Prelude.Float"
+      -> fmap negate (floatValue fexp)
+    _              -> Nothing
 
   apply = pre "apply"
 
