@@ -18,10 +18,6 @@ MODULE 'FacMore' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
--- Non-fail condition of operation `gt3`:
-gt3'nonfail :: Int -> Bool
-gt3'nonfail v1 = v1 > 3
-
 -- Non-fail condition of operation `fac`:
 fac'nonfail :: Int -> Bool
 fac'nonfail v1 = (v1 == 0) || (v1 > 0)
@@ -34,6 +30,10 @@ fac5'nonfail v1 v2 = ((v2 + 5) == 0) || ((v2 + 5) > 0)
 facNeg'nonfail :: Int -> Bool
 facNeg'nonfail v1 = (v1 > 0) || ((not (v1 > 0)) && (v1 > 3))
 
+-- Non-fail condition of operation `gt3`:
+gt3'nonfail :: Int -> Bool
+gt3'nonfail v1 = v1 > 3
+
 MODULE 'FacIO' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
@@ -43,6 +43,7 @@ fac'nonfail :: Int -> Bool
 fac'nonfail v1 = (v1 == 0) || (v1 > 0)
 
 MODULE 'UseDiv' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+divZero: <FAILING>
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
@@ -133,9 +134,10 @@ MODULE 'Tuple' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 
 NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
 
--- Non-fail condition of operation `useTriple`:
-useTriple'nonfail :: Int -> Bool
-useTriple'nonfail v1 = v1 > 0
+-- Non-fail condition of operation `fPair`:
+fPair'nonfail :: Pair Int Int -> Bool
+fPair'nonfail v1 = case v1 of
+    MkPair v2 v3 -> (v2 + v3) > 0
 
 -- Non-fail condition of operation `fTriple`:
 fTriple'nonfail :: (Int,Int,Int) -> Bool
@@ -146,10 +148,9 @@ fTriple'nonfail v1 = case v1 of
 usePair'nonfail :: Int -> Bool
 usePair'nonfail v1 = v1 > 0
 
--- Non-fail condition of operation `fPair`:
-fPair'nonfail :: Pair Int Int -> Bool
-fPair'nonfail v1 = case v1 of
-    MkPair v2 v3 -> (v2 + v3) > 0
+-- Non-fail condition of operation `useTriple`:
+useTriple'nonfail :: Int -> Bool
+useTriple'nonfail v1 = v1 > 0
 
 MODULE 'CaseCond' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 
@@ -164,4 +165,22 @@ sumPos'nonfail :: (Int,Int) -> Bool
 sumPos'nonfail v1 = (case v1 of
     (v2,v3) -> False) || (case v1 of
     (v2,v3) -> v3 > 0)
+
+MODULE 'UseFloatDiv' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+divZero: <FAILING>
+
+NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
+
+-- Non-fail condition of operation `div1`:
+div1'nonfail :: Float -> Float -> Bool
+div1'nonfail v1 v2 = not (v2 == 0.0)
+
+MODULE 'UseSqrt' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
+failedSqrt: <FAILING>
+
+NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:
+
+-- Non-fail condition of operation `sqrtP2`:
+sqrtP2'nonfail :: Float -> Bool
+sqrtP2'nonfail v1 = (v1 + 2.0) >= 0.0
 

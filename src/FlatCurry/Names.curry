@@ -42,9 +42,11 @@ binaryPrimOps :: [(String,String)]
 binaryPrimOps =
   [("constrEq","==")
   ,("_impl#==#Prelude.Eq#Prelude.Int","==")
+  ,("_impl#==#Prelude.Eq#Prelude.Float","==")
   ,("_impl#==#Prelude.Eq#Prelude.Char","==")
   ,("/=","/=")  -- will be translated as negated '='
   ,("_impl#/=#Prelude.Eq#Prelude.Int","/=")
+  ,("_impl#/=#Prelude.Eq#Prelude.Float","/=")
   ,("_impl#/=#Prelude.Eq#Prelude.Char","/=")
   ,("_impl#+#Prelude.Num#Prelude.Int","+")
   ,("_impl#-#Prelude.Num#Prelude.Int","-")
@@ -57,6 +59,10 @@ binaryPrimOps =
   ,("_impl#<#Prelude.Ord#Prelude.Int","<")
   ,("_impl#>=#Prelude.Ord#Prelude.Int",">=")
   ,("_impl#<=#Prelude.Ord#Prelude.Int","<=")
+  ,("_impl#+#Prelude.Num#Prelude.Float","+")
+  ,("_impl#-#Prelude.Num#Prelude.Float","-")
+  ,("_impl#*#Prelude.Num#Prelude.Float","*")
+  ,("_impl#/#Prelude.Num#Prelude.Float","/")
   ,("_impl#>#Prelude.Ord#Prelude.Float",">")
   ,("_impl#<#Prelude.Ord#Prelude.Float","<")
   ,("_impl#>=#Prelude.Ord#Prelude.Float",">=")

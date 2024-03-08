@@ -24,7 +24,7 @@ check_diff() {
 
 LOGFILE=xxx$$
 # Example programs to be tested:
-TESTPROGS="Fac UseFac FacMore FacIO UseDiv Diamond Sig ListLength Nth NthInfer NthZero NthZeroNonFail NthZeroNonFailWrong One HeadPos CharBounds Tuple CaseCond"
+TESTPROGS="Fac UseFac FacMore FacIO UseDiv Diamond Sig ListLength Nth NthInfer NthZero NthZeroNonFail NthZeroNonFailWrong One HeadPos CharBounds Tuple CaseCond UseFloatDiv UseSqrt"
 
 # Testing standard (top constructor) domain:
 TOOL="curry-calltypes"

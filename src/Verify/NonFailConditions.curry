@@ -97,17 +97,39 @@ nonFailCondsOfModule prog = map toNFCond nfconds
   nfconds = filter ((nonfailSuffix `isSuffixOf`) . snd . funcName)
                    (progFuncs prog)
 
-{-
-preludeNonFailConds :: [(QName,[Expr])]
-preludeNonFailConds = map (\divop -> (pre divop, [arg2NonZero])) divops
+------------------------------------------------------------------------------
+--- Returns the non-fail condition for particular predefined operations
+--- with non-trivial non-fail conditions.
+lookupPredefinedNonFailCond :: QName -> Maybe NonFailCond
+lookupPredefinedNonFailCond qf = lookup qf predefinedNonFailConds
+
+predefinedNonFailConds :: [(QName,NonFailCond)]
+predefinedNonFailConds =
+  map (\divop -> (divop, (divargs fcInt, divcond int0))) intDivOps ++
+  map (\divop -> (divop, (divargs fcFloat, divcond float0))) floatDivOps ++
+  map (\sqop -> (pre sqop, sqrtcond)) sqrtops
  where
-  arg2NonZero = Comb FuncCall ("Prelude","/=") [Var 2, Lit (Intc 0)]
-  divops = [ "_impl#div#Prelude.Integral#Prelude.Int"
-           , "_impl#mod#Prelude.Integral#Prelude.Int"
-           , "_impl#quot#Prelude.Integral#Prelude.Int"
-           , "_impl#rem#Prelude.Integral#Prelude.Int"
-           , "div", "mod", "quot", "rem" ]
--}
+  divargs te = map (\i -> (i,te)) [1,2]
+  divcond lit0 = fcNot (Comb FuncCall (pre "==") [Var 2, Lit lit0])
+  int0 = Intc 0
+  float0 = Floatc 0
+
+  sqrtcond = ([(1,fcFloat)], Comb FuncCall (pre ">=") [Var 1, Lit float0])
+  sqrtops = [ "_impl#sqrt#Prelude.Floating#Prelude.Float", "sqrt" ]
+
+--- Integer division operators defined in the prelude.
+intDivOps :: [QName]
+intDivOps = map pre
+  [ "_impl#div#Prelude.Integral#Prelude.Int"
+  , "_impl#mod#Prelude.Integral#Prelude.Int"
+  , "_impl#quot#Prelude.Integral#Prelude.Int"
+  , "_impl#rem#Prelude.Integral#Prelude.Int"
+  , "div", "mod", "quot", "rem" ]
+
+--- Float division operators defined in the prelude.
+floatDivOps :: [QName]
+floatDivOps = map pre
+  [ "_impl#/#Prelude.Fractional#Prelude.Float", "/" ]
 
 ------------------------------------------------------------------------------
 --- Prints a list of conditions for operations (if not empty).

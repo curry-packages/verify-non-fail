@@ -215,8 +215,10 @@ defaultCallTypes =
       , "_impl#mod#Prelude.Integral#Prelude.Int"
       , "_impl#quot#Prelude.Integral#Prelude.Int"
       , "_impl#rem#Prelude.Integral#Prelude.Int"
+      , "_impl#/#Prelude.Fractional#Prelude.Float", "/"
       , "sqrt", "sqrtFloat", "prim_sqrtFloat"
       , "_impl#sqrt#Prelude.Floating#Prelude.Float"
+      -- TODO: extend to further float operations, like log, asin,...
       ] ++
   [ (pre "&",   [[MCons [(pre "True",[])], MCons [(pre "True",[])]]])
   , (pre "cond",[[MCons [(pre "True",[])], AnyT]])

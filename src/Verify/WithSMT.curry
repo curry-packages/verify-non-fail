@@ -154,15 +154,16 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
   let smtinput = scripttitle ++ "\n" ++ smtprelude ++ showSMT smt
   printWhenDetails opts $ "SMT SCRIPT:\n" ++ showWithLineNums smtinput
   let z3opts = ["-smt2", "-T:2"]
-  when (optStoreSMT opts) $ storeSMT "SMT-" z3opts smtinput
+  when (optStoreSMT opts) (storeSMT "SMT-" z3opts smtinput >> return ())
   printWhenDetails opts $
     "CALLING Z3 (with options: " ++ unwords z3opts ++ ")..."
   (ecode,out,err) <- evalCmd "z3" ("-in" : z3opts) smtinput
   when (ecode > 0) $ do
     printWhenStatus opts $ "EXIT CODE: " ++ show ecode
-    storeSMT "smterror-" z3opts smtinput
+    outfile <- storeSMT "smterror-" z3opts smtinput
     when (optVerb opts < 3) $ printWhenStatus opts $
-      "ERROR in SMT script (saved in 'error.smt'):\n" ++ out ++ "\n" ++ err
+      "ERROR in SMT script (saved in '" ++ outfile ++ "'):\n" ++
+      out ++ "\n" ++ err
   printWhenDetails opts $ "RESULT:\n" ++ out
   unless (null err) $ printWhenDetails opts $ "ERROR:\n" ++ err
   let pcvalid = let ls = lines out in not (null ls) && head ls == "unsat"
@@ -175,6 +176,7 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
     let outfile = fileprefix ++ transOpName qf ++ "-" ++ show ctime ++ ".smt"
         execcmt = unwords $ ["; Run with: z3"] ++ z3opts ++ [outfile]
     writeFile outfile (execcmt ++ "\n\n" ++ script)
+    return outfile
 
 -- Translate a typed variable into an SMT declaration:
 typedVar2SMT :: (Int,TypeExpr) -> Command

@@ -63,7 +63,7 @@ import qualified Main_NONGENERIC -- workaround for KiCS2
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 06/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 08/03/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -361,7 +361,7 @@ printVerifyResult opts vst mname isvisible = do
   fdecls <- currentFuncDecls vst
   unless (null funconds) $
     putStrLn $ "NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:\n" ++
-               showConditions fdecls funconds
+               showConditions fdecls (sortFunResults funconds)
  where
   showFun qf = not (optPublic opts) || isvisible qf
 
@@ -616,6 +616,15 @@ setVarExps varexps = do
   st <- get
   put $ st { vstVarExp = varexps }
 
+-- Sets the FlatCurry type of a given variable.
+-- This is used to specialize numeric types during verification
+-- of predefined numeric operations.
+setVarExpTypeOf :: TermDomain a => Int -> TypeExpr -> VerifyStateM a ()
+setVarExpTypeOf var te = do
+  st <- get
+  put $ st { vstVarExp = map (\(v,t,e) -> if v==var then (v,te,e) else (v,t,e))
+                             (vstVarExp st) }
+
 -- Adds types and expressions for new variables.
 addVarExps :: TermDomain a => [(Int,TypeExpr,Expr)] -> VerifyStateM a ()
 addVarExps varexps = do
@@ -736,12 +745,12 @@ addEquVarCondition var exp = do
                            -- note: the Eq class dictioniary is missing...
   addConjunct conj
 
--- Gets the call condition of a given operation.
-getCallConditionOf :: TermDomain a => QName -> VerifyStateM a NonFailCond
-getCallConditionOf qf = do
+-- Gets the possible non-fail condition of a given operation.
+getNonFailConditionOf :: TermDomain a => QName -> VerifyStateM a (Maybe NonFailCond)
+getNonFailConditionOf qf = do
   st <- get
-  return $ maybe (maybe ([],fcTrue) id (Map.lookup qf (vstImpFunConds st)))
-                 id
+  return $ maybe (Map.lookup qf (vstImpFunConds st))
+                 Just
                  (lookup qf (vstFunConds st))
 
 -- Gets the abstract call type of a given operation.
@@ -829,28 +838,32 @@ verifyFuncRule vs ftype exp = do
   setFreshVarIndex (maximum (0 : vs ++ allVars exp) + 1)
   setVarExps  (map (\(v,te) -> (v, te, Var v)) (funcType2TypedVars vs ftype))
   qf <- getCurrentFuncName
-  (nfcvars,fcond) <- getCallConditionOf qf
-  let freenfcargs = filter ((`notElem` vs) . fst) nfcvars
-  newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
-  -- add renamed free variables of condition to the current set of variables
-  addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
-  -- rename free variables before adding the condition:
-  setCallCondition $ expandExpr (map (\(nv,(v,t)) -> (v,t,Var nv))
-                                     (zip newfvars freenfcargs))  fcond
+  mbnfcond <- getNonFailConditionOf qf
+  maybe
+    (setCallCondition fcTrue)
+    (\(nfcvars,fcond) -> do
+      let freenfcargs = filter ((`notElem` vs) . fst) nfcvars
+      newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
+      -- add renamed free variables of condition to the current set of variables
+      addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
+      -- rename free variables before adding the condition:
+      setCallCondition $ expandExpr (map (\(nv,(v,t)) -> (v,t,Var nv))
+                                         (zip newfvars freenfcargs))  fcond)
+     mbnfcond
   printIfVerb 2 $ "CHECKING FUNCTION " ++ snd qf
   ctype    <- getCallType qf (length vs)
   rhstypes <- mapM (\f -> getCallType f 0) (funcsInExpr exp)
   if all isTotalACallType (ctype:rhstypes)
     then printIfVerb 2 $ "not checked since trivial"
-    else maybe (if fcond == fcTrue
-                  then printIfVerb 2 $
-                         "not checked since marked as always failing"
-                  else do
+    else maybe (maybe
+                  (printIfVerb 2 "not checked since marked as always failing")
+                  (\_ -> do
                     setVarTypes (map (\v -> (v, [(IOT [([], anyType)], [])]))
                                      vs)
                     showVarExpTypes
                     verifyExpr True exp
                     return () )
+                  mbnfcond)
                (\atargs -> do
                   setVarTypes (map (\(v,at) -> (v, [(IOT [([], at)], [])]))
                                    (zip vs atargs))
@@ -910,7 +923,7 @@ verifyVarExpr ve exp = case exp of
                        -- instead of copying the current types for v to ve:
                        return $ [(ve, vtypes)]
   Lit l         -> return [(ve, [(IOT [([], aLit l)], [])])]
-  Comb ct qf es -> checkDivOpNonZero exp $ do
+  Comb ct qf es -> checkPredefinedOp exp $ do
     vs <- if isEncSearchOp qf
             then -- for encapsulated search, failures in arguments are hidden
                  mapM (verifyExpr False) es
@@ -984,31 +997,39 @@ verifyFuncCall exp qf vs = do
     else do atype <- getCallType qf (length vs)
             if isTotalACallType atype 
               then return ()
-              else do nfcond <- getCallConditionOf qf
-                      verifyNonTrivFuncCall exp qf vs atype nfcond
+              else do mbnfcond <- getNonFailConditionOf qf
+                      verifyNonTrivFuncCall exp qf vs atype mbnfcond
 
 -- Verify the non-trivial abstract type or non-fail condition
 --  of a function call.
+-- The first argument is the expression of the call (used to show
+-- the possible failed expression), the second and third arguments
+-- are the name and the arguments of the current function call.
+-- The last argument is the possible non-fail condition for this function.
 verifyNonTrivFuncCall :: TermDomain a => Expr -> QName -> [Int]
-                      -> ACallType a -> NonFailCond -> VerifyStateM a ()
-verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
+                      -> ACallType a -> Maybe NonFailCond -> VerifyStateM a ()
+verifyNonTrivFuncCall exp qf vs atype mbnfcond = do
   incrNonTrivialCall
   currfn <- getCurrentFuncName
   printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
                   snd qf ++ showArgumentVars vs ++
                   "\n  w.r.t. call type: " ++ prettyFunCallAType atype
-  -- compute the precondition for this call by renaming the arguments:
-  let freenfcargs = filter ((`notElem` [1..length vs]) . fst) nfcvars
-  newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
-  -- add renamed free variables of condition to the current set of variables
-  addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
-  -- rename variable in condition:
-  let rnmcvars = zip [1.. length vs] vs ++
-                 map (\(nv,(v,_)) -> (v, nv)) (zip newfvars freenfcargs)
-  st <- get
-  let callcond = expandExpr (vstVarExp st) (renameAllVars rnmcvars nfcond)
-  unless (callcond == fcTrue) $ printIfVerb 2 $
-    "  and call condition: " ++ showSimpExp callcond
+  callcond <- maybe
+    (return fcFalse)
+    (\(nfcvars,nfcond) -> do
+      -- compute the precondition for this call by renaming the arguments:
+      let freenfcargs = filter ((`notElem` [1..length vs]) . fst) nfcvars
+      newfvars <- mapM (\_ -> newFreshVarIndex) freenfcargs
+      -- add renamed free variables of condition to the current set of variables
+      addVarExps (map (\(v,(_,t)) -> (v,t,Var v)) (zip newfvars freenfcargs))
+      -- rename variable in condition:
+      let rnmcvars = zip [1.. length vs] vs ++
+                     map (\(nv,(v,_)) -> (v, nv)) (zip newfvars freenfcargs)
+      st <- get
+      let callcond0 = expandExpr (vstVarExp st) (renameAllVars rnmcvars nfcond)
+      printIfVerb 2 $ "  and call condition: " ++ showSimpExp callcond0
+      return callcond0)
+    mbnfcond
   showVarExpTypes
   --allvts <- getVarTypes
   --printIfVerb 3 $ "Current variable types:\n" ++ showVarTypes allvts
@@ -1024,7 +1045,10 @@ verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
          -- call type of this function and analyze it again.
          do printIfVerb 2 "UNSATISFIED ABSTRACT CALL TYPE\n"
             maybe
-              (do -- check whether the negated call condition is unsatisfiable
+              (if callcond == fcFalse
+                 then addFailedFunc exp Nothing callcond
+                 else do
+                  -- check whether the negated call condition is unsatisfiable
                   -- (if yes: call condition holds)
                   implcond <- getExpandedConditionWithConj (fcNot callcond)
                   implied  <- isUnsatisfiable implcond
@@ -1040,42 +1064,58 @@ verifyNonTrivFuncCall exp qf vs atype (nfcvars,nfcond) = do
  where
   printVATypes = intercalate ", " . map (\ (v,t) -> show v ++ '/' : showType t)
 
--- Auxiliary operation to support specific handling of applying some division
--- operation to non-zero integer constants. If the expression is a call
--- to a `div` or `mod` operation where the second argument is a non-zero
--- constant, return just the first argument, otherwise `Nothing`.
--- This is specific to the current implementation of div/mod where a call
--- like `div e n` is translated into the FlatCurry expression
--- `apply (apply Prelude._impl#div#Prelude.Integral#Prelude.Int e) n`
-checkDivOpNonZero :: TermDomain a => Expr -> VerifyStateM a (VarTypesMap a)
+-- Auxiliary operation to support specific handling of applying predefined
+-- operations with specific non-fail conditions.
+-- If the current expression (first argument) is not a specific
+-- predefined operation, the computation will be continued by calling
+-- the second argument (a continuation).
+-- For instance, division operations require that the second argument is
+-- non-zero. If this argument is a constant, it will be immediately checked,
+-- otherwise a non-fail condition will be generated and checked.
+-- Since such primitive operations can be invoked by FlatCurry expressions
+-- with various structures (due to the numeric type classes),
+-- these structures will be checked.
+checkPredefinedOp :: TermDomain a => Expr -> VerifyStateM a (VarTypesMap a)
                   -> VerifyStateM a (VarTypesMap a)
-checkDivOpNonZero exp cont = case exp of
-  Comb FuncCall ap1 [ Comb FuncCall ap2 [Comb FuncCall qf _, arg1], arg2]
-    | ap1 == apply && ap2 == apply && qf `elem` divops
-    -> case intValue arg2 of
-         Just i  -> do unless (i /= 0) $ addFailedFunc exp Nothing fcFalse
-                       verifyExpr True arg1
-                       return []
-         Nothing -> do v1 <- verifyExpr True arg1
-                       v2 <- verifyExpr True arg2
-                       let nfcond = fcNot (Comb FuncCall (pre "==")
-                                                 [Var v2, Lit (Intc 0)])
-                       verifyNonTrivFuncCall exp qf [v1,v2] failACallType
-                         ([(v2, fcInt)], nfcond)
-                       cont
-  Comb FuncCall ap1 [ Comb FuncCall qf [], arg] -- check for sqrt call
+checkPredefinedOp exp cont = case exp of
+  -- check integer division:
+  Comb FuncCall ap1 [Comb FuncCall ap2 [Comb FuncCall qf _, arg1], arg2]
+    | ap1 == apply && ap2 == apply && qf `elem` intDivOps
+    -> tryCheckNumValue (intValue arg2) qf arg1 arg2 fcInt
+  -- check float division:
+  Comb FuncCall qf [arg1, arg2]
+    | qf == pre "_impl#/#Prelude.Fractional#Prelude.Float"
+    -> tryCheckNumValue (floatValue arg2) qf arg1 arg2 fcFloat
+  Comb FuncCall ap1 [Comb FuncCall ap2 [Comb FuncCall qf _, arg1], arg2]
+    | ap1 == apply && ap2 == apply && qf `elem` floatDivOps
+    -> tryCheckNumValue (floatValue arg2) qf arg1 arg2 fcFloat
+  -- check sqrt call:
+  Comb FuncCall ap1 [Comb FuncCall qf [], arg]
     | ap1 == apply && qf == pre "_impl#sqrt#Prelude.Floating#Prelude.Float"
-    -> case floatValue arg of
-         Just x  -> do unless (x >= 0) $ addFailedFunc exp Nothing fcFalse
-                       return []
-         Nothing -> do v <- verifyExpr True arg
-                       let nfcond = Comb FuncCall (pre ">=")
-                                         [Var v, Lit (Floatc 0.0)]
-                       verifyNonTrivFuncCall exp qf [v] failACallType
-                         ([(v, fcFloat)], nfcond)
-                       cont
+    -> maybe (verifyPredefinedOp qf [arg] fcFloat)
+             (\x -> do unless (x >= 0) $ addFailedFunc exp Nothing fcFalse
+                       return [])
+             (floatValue arg)
   _ -> cont
  where
+  tryCheckNumValue mbx qf arg1 arg2 te =
+    maybe (verifyPredefinedOp qf [arg1,arg2] te)
+          (\z -> do if z == 0 then addFailedFunc exp Nothing fcFalse
+                              else printIfVerb 3 nonZeroOkMsg
+                    verifyExpr True arg1
+                    return [])
+          mbx
+
+  verifyPredefinedOp qf args te =
+     maybe (do printIfVerb 0 $
+                 "WARNING: non-fail condition of " ++ snd qf ++ " not found!"
+               cont)
+           (\nfc -> do vs <- mapM (verifyExpr True) args
+                       mapM_ (\v -> setVarExpTypeOf v te) vs
+                       verifyNonTrivFuncCall exp qf vs failACallType (Just nfc)
+                       return [])
+           (lookupPredefinedNonFailCond qf)
+
   intValue e = case e of
     Lit (Intc i) -> Just i
     Comb FuncCall ap [ Comb FuncCall fromint _ , nexp] 
@@ -1084,20 +1124,18 @@ checkDivOpNonZero exp cont = case exp of
 
   floatValue e = case e of
     Lit (Floatc f) -> Just f
+    Comb FuncCall ap [ Comb FuncCall fromfloat _ , nexp] 
+      | ap == apply && fromfloat == pre "fromFloat" -> floatValue nexp
+    Comb FuncCall ap [(Comb FuncCall fromint _), nexp]
+       | ap == apply && fromint == pre "fromInt" -> fmap fromInt (intValue nexp)
     Comb FuncCall negFloat [fexp]
       | negFloat == pre "_impl#negate#Prelude.Num#Prelude.Float"
-      -> fmap negate (floatValue fexp)
+                   -> fmap negate (floatValue fexp)
     _              -> Nothing
 
   apply = pre "apply"
 
-  divops =
-    map pre [ "_impl#div#Prelude.Integral#Prelude.Int"
-            , "_impl#mod#Prelude.Integral#Prelude.Int"
-            , "_impl#quot#Prelude.Integral#Prelude.Int"
-            , "_impl#rem#Prelude.Integral#Prelude.Int"
-            , "div", "mod", "quot", "rem" ]
-
+  nonZeroOkMsg = "Divion with non-zero constant is non-failing"
 
 -- Verify whether missing branches exists and are not reachable.
 verifyMissingBranches :: TermDomain a => Expr -> Int -> [BranchExpr] -> VerifyStateM a ()
