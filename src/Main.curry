@@ -17,6 +17,7 @@ import Data.IORef
 import Data.List
 import Data.Maybe                  ( isNothing )
 import System.Environment          ( getArgs )
+import System.IO                   ( hFlush, stdout )
 
 import Debug.Trace ( trace )
 
@@ -40,7 +41,6 @@ import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist
                                   , removeDirectory )
 import System.FilePath            ( (</>) )
-import System.IO                  ( hFlush, stdout )
 import System.Path                ( fileInPath )
 import System.Process             ( exitWith )
 

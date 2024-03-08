@@ -2,8 +2,13 @@ MODULE 'Prelude' VERIFIED W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:
 !!: <FAILING>
 &: (True, True)
 &>: (True, _)
+/: <FAILING>
 =:<=: <FAILING>
 =:=: <FAILING>
+_def#logBase#Prelude.Floating: <FAILING>
+_def#recip#Prelude.Fractional: <FAILING>
+_def#tan#Prelude.Floating: <FAILING>
+_def#tanh#Prelude.Floating: <FAILING>
 _impl#**#Prelude.Floating#Prelude.Float: <FAILING>
 _impl#/#Prelude.Fractional#Prelude.Float: <FAILING>
 _impl#ceiling#Prelude.RealFrac#Prelude.Float: <FAILING>
@@ -58,9 +63,11 @@ foldr1: (_, _:_)
 head: _:_
 mod: <FAILING>
 quot: <FAILING>
+read: <FAILING>
 rem: <FAILING>
 showTuple: _:_
 solve: True
+sqrt: <FAILING>
 tail: _:_
 
 MODULE 'Data.Maybe' VERIFIED

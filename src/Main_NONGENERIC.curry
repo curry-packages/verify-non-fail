@@ -22,6 +22,7 @@ import Data.IORef
 import Data.List
 import Data.Maybe                  ( isNothing )
 import System.Environment          ( getArgs )
+import System.IO                   ( hFlush, hPutStrLn, stderr, stdout )
 
 import Debug.Trace ( trace )
 
@@ -44,7 +45,6 @@ import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist
                                   , removeDirectory )
 import System.FilePath            ( (</>) )
-import System.IO                  ( hFlush, stdout )
 import System.Path                ( fileInPath )
 import System.Process             ( exitWith, system )
 
@@ -80,7 +80,7 @@ main = do
   if optDomainID opts /= analysisName valueAnalysis
     then do
       let cmd = "curry-calltypes-" ++ map toLower (optDomainID opts)
-      putStrLn $ "Different domain, trying executable '" ++ cmd ++ "'..."
+      hPutStrLn stderr $ "Different domain, trying executable '" ++ cmd ++ "'..."
       system (cmd ++ concatMap (\a -> " '" ++ a ++ "'") args) >>= exitWith
     else do
       when (optDeleteCache opts) $ deleteVerifyCacheDirectory opts

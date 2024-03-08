@@ -43,7 +43,7 @@ TESTPROGS="ArithDiv DataList DepthkDomain EncapSearch Equality InfLists InferCal
 # Testing standard (top constructor) domain:
 TOOL="curry-calltypes"
 
-#$TOOL -q --nosmt $COMPILELIBS
+$TOOL -q --nosmt $COMPILELIBS
 $TOOL -r -q --nosmt $TESTLIBS | tee $LOGFILE
 check_diff $LOGFILE RESULTLIBS.txt
 $TOOL -r -q --nosmt $TESTPROGS | tee $LOGFILE
