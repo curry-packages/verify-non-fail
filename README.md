@@ -103,19 +103,7 @@ The tool can be installed via the command
 in the main directory of this package.
 This installs the executable `curry-calltypes` in the bin-directory of CPM.
 
-Installation with KiCS2:
-------------------------
-
-Due to an unresolved memory leak in KiCS2,
-it is necessary to generate different executables for each
-abstract domain used by the inferences.
-This can be done by executing
-
-    > make
-
-in the main directory of this package.
-This installs the executable `curry-calltypes` as well as three
-other executables which are implicitly invoked by the main
-executable in the bin-directory of CPM.
+If one use KiCS2 to install this tool, one should use version 3.1.0
+of April 11, 2024 (or newer) due to a memory leak in an older version of KiCS2.
 
 ------------------------------------------------------------------------------

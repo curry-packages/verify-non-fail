@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version March 2024
+--- @version April 2024
 -------------------------------------------------------------------------
 
 module Main where
@@ -57,18 +57,15 @@ import Verify.ProgInfo
 import Verify.Statistics
 import Verify.WithSMT
 
-import qualified Main_NONGENERIC -- workaround for KiCS2
-
 ------------------------------------------------------------------------------
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 08/03/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 12/04/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
-main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
-     | otherwise = do
+main = do
   args <- getArgs
   (opts0,progs) <- processOptions banner args
   -- set analysis to top values if unspecified
@@ -94,7 +91,7 @@ main | curryCompiler == "kics2" = Main_NONGENERIC.main -- workaround for KiCS2
  where
   runWith analysis opts ms = do
     pistore <- newIORef emptyProgInfo
-    astore <- newIORef (AnaStore [])
+    astore  <- newIORef (AnaStore [])
     mapM_ (runModuleAction (verifyModule analysis pistore astore opts)) ms
 
 --- Verify a single module.
