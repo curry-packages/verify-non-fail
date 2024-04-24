@@ -168,6 +168,15 @@ isSetFunOp (mn,fn) =
   take 3 fn == "set" &&
   all isDigit (drop 3 fn)
 
+-- Is a qualified name an allowed Curry identifier (i.e., not a generated id)?
+isCurryID :: QName -> Bool
+isCurryID (_,n) = case n of
+  []               -> False
+  c:cs | isAlpha c -> all (\c -> isAlphaNum c || c `elem` "'_") cs
+       | otherwise -> all (flip elem opChars) n
+ where
+  opChars = "~!@#$%^&*+-=<>?./|\\:"
+
 ------------------------------------------------------------------------------
 fst3 :: (a,b,c) -> a
 fst3 (x,_,_) = x

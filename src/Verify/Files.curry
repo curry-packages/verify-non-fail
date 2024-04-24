@@ -146,13 +146,21 @@ storeTypes opts mname fdecls consinfos acalltypes pubntcalltypes funconds
   writeFileAndReport ctfile
     (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
   writeFileAndReport nffile
-    (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod funconds)))
+    (unlines (map (\ ((_,fn),ct) -> show (fn, filterUnknownTypes ct))
+                  (filterMod funconds)))
   writeFileAndReport iofile
     (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
   when (optSpecModule opts) $
     writeSpecModule opts mname fdecls (sortFunResults pubntcalltypes)
                     (sortFunResults funconds)
  where
+  -- Filter typed variables with unknown types from a non-fail condition
+  -- (these are usually pattern variables) to avoid type inference problems
+  -- for them.
+  -- (A better solution would be the removal of all case pattern variables.)
+  filterUnknownTypes :: NonFailCond -> NonFailCond
+  filterUnknownTypes (vts,e) = (filter ((/=unknownType) . snd) vts, e)
+
   writeFileAndReport f s = do
     when (optVerb opts > 3) $ putStr $ "Writing cache file '" ++ f ++ "'..."
     writeFile f s

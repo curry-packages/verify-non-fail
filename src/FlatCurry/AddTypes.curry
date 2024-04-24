@@ -132,7 +132,7 @@ addTVarBind tvar texp = do
 
 -- Unify the given types and add the unifier to the current substitution.
 -- Newer type variables are bound to older ones in order to keep
--- a given polymoprhic (function) type.
+-- a given polymorphic (function) type.
 unifyTypes :: TypeExpr -> TypeExpr -> TransState ()
 unifyTypes texp1 texp2 = do
   te1 <- applyCurrTSubst texp1

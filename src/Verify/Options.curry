@@ -37,6 +37,7 @@ data Options = Options
   , optEnforceNF   :: Bool -- eval data to normal form (to avoid mem leaks)?
   , optRerun       :: Bool -- rerun verification of current module
   , optPublic      :: Bool -- show types (call, in/out) of public ops only? 
+  , optGenerated   :: Bool -- show types (call, in/out) of generated operations? 
   , optCallTypes   :: Bool -- show call types
   , optIOTypes     :: Bool -- show input/output types
   , optVerify      :: Bool -- verify call types
@@ -52,8 +53,8 @@ data Options = Options
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
-  Options 1 False "" True False False False True False False True True False
-          False False False False ""
+  Options 1 False "" True False False False True True False False True True
+          False False False False False ""
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -87,7 +88,10 @@ options =
             "verbosity level:\n0: quiet (same as `-q')\n1: show status messages (default)\n2: show intermediate results (same as `-v')\n3: show also verification details\n4: show all details"
   , Option "a" ["all"]
             (NoArg (\opts -> opts { optPublic = False }))
-           "show types for all (also private) operations"
+           "show types of all (also private) operations"
+  , Option "" ["nogenerated"]
+            (NoArg (\opts -> opts { optGenerated = False }))
+           "do not show types of generated operations"
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
            "show call types"

@@ -22,7 +22,7 @@ import FlatCurry.Simplify
 import Verify.ProgInfo
 
 --- Non-fail conditions are represented as a pair of typed variables
---- occurring in the conditions and a Boolean expressions
+--- occurring in the conditions and a Boolean expression
 --- (in FlatCurry representation).
 type NonFailCond = ([(Int,TypeExpr)], Expr)
 

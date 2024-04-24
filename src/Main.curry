@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 12/04/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 24/04/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -108,8 +108,9 @@ verifyModule valueanalysis pistore astore opts0 mname = do
   flatprog <- getFlatProgFor pistore mname
   let orgfdecls    = progFuncs flatprog
       numfdecls    = length orgfdecls
-      visfuncs     = map funcName (filter ((== Public) . funcVisibility)
-                                          orgfdecls)
+      visfuncs     = filter (\fn -> optGenerated opts || isCurryID fn)
+                            (map funcName (filter ((== Public) . funcVisibility)
+                                          orgfdecls))
       numvisfuncs  = length visfuncs
       visfuncset   = Set.fromList visfuncs
       isVisible qf = Set.member qf visfuncset
