@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 24/04/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 07/05/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -185,6 +185,16 @@ verifyModule valueanalysis pistore astore opts0 mname = do
     storeTypes opts mname fdecls modconsinfos finalacalltypes
       (filter (isVisible .fst) finalntacalltypes) (vstFunConds vst) iotypes
     storeStatistics opts mname stattxt statcsv
+    when (optStoreFuncs opts) $ do
+      let nfname = mname ++ ".NONFAIL"
+          flname = mname ++ ".FAIL"  
+          totalfuncs = filter (isTotalACallType . snd) finalacalltypes
+      writeFile nfname
+        (unlines (map (\((mn,fn),_) -> mn ++ " " ++ fn) totalfuncs))
+      putStrLn $ "Non-failing functions stored in '" ++ nfname ++ "'."
+      writeFile flname
+        (unlines (map (\((mn,fn),_) -> mn ++ " " ++ fn) finalntacalltypes))
+      putStrLn $ "Possibly failing functions stored in '" ++ flname ++ "'."
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
 
 --- Infer the initial (abstract) call types of all functions in a program and

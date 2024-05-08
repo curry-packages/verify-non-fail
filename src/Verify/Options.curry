@@ -42,6 +42,7 @@ data Options = Options
   , optIOTypes     :: Bool -- show input/output types
   , optVerify      :: Bool -- verify call types
   , optSMT         :: Bool -- use SMT solver (Z3) to verify non-fail conditions?
+  , optStoreFuncs  :: Bool -- store non-failing function names in file
   , optStoreSMT    :: Bool -- store generated SMT scripts (for debugging)
   , optError       :: Bool -- consider Prelude.error as failing operation?
   , optSpecModule  :: Bool -- generate a `..._SPEC` module?
@@ -54,7 +55,7 @@ data Options = Options
 defaultOptions :: Options
 defaultOptions =
   Options 1 False "" True False False False True True False False True True
-          False False False False False ""
+          False False False False False False ""
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -125,6 +126,9 @@ options =
   , Option "s" ["statistics"]
            (NoArg (\opts -> opts { optStats = True }))
            "show/store statistics (functions, failures,...)"
+  , Option "" ["storefuncs"]
+           (NoArg (\opts -> opts { optStoreFuncs = True }))
+           "store (non-)failing functions in '<mod>.(NON)FAIL'"
   , Option "" ["storesmt"]
            (NoArg (\opts -> opts { optStoreSMT = True }))
            "store generated SMT scripts (for debugging)"

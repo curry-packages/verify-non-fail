@@ -172,7 +172,7 @@ isSetFunOp (mn,fn) =
 isCurryID :: QName -> Bool
 isCurryID (_,n) = case n of
   []               -> False
-  c:cs | isAlpha c -> all (\c -> isAlphaNum c || c `elem` "'_") cs
+  x:xs | isAlpha x -> all (\c -> isAlphaNum c || c `elem` "'_") xs
        | otherwise -> all (flip elem opChars) n
  where
   opChars = "~!@#$%^&*+-=<>?./|\\:"
