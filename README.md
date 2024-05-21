@@ -2,12 +2,12 @@ verify-non-fail: A tool to verify Curry operations as non-failing
 =================================================================
 
 This package contains a tool to verify that all operations
-in a given module are non-failing, i.e., tehir evaluation does
+in a given module are non-failing, i.e., their evaluation does
 not result in a failure, if they are called with appropriate
 arguments. The tool automatically infers abstract call types
 specifying supersets of appropriate arguments.
 
-As am example, consider the following operation to compute the last element
+As an example, consider the following operation to compute the last element
 of a given list:
 
     last :: [a] -> a
@@ -21,10 +21,10 @@ of allowed top-level constructors), the inferred call type is
 
 specifying that `last` does not fail if the argument is a
 non-empty list, i.e., evaluable to some data term rooted by
-the list constructor `:`.
+the list constructor "`:`".
 
 When an operation with such a restricted call type is used,
-the tool checks whether it is used in an environment which
+the tool checks whether it is used in a context which
 ensures its call type. For instance, the operations
 
     head (x:xs) = x
@@ -38,9 +38,9 @@ have the inferred call types
     head: {:}
     tail: {:}
 
-When these operations are applied, it should be ensure
+When these operations are applied, it should be ensured
 (in a top-level functional computation) that the actual arguments
-are non-empty lists, as in this operation:
+are non-empty lists, as in the following operation:
 
     readCommand :: IO ()
     readCommand = do
