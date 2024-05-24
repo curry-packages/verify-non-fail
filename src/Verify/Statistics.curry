@@ -30,11 +30,11 @@ statsFile mname = mname ++ "-STATISTICS"
 showStatistics :: TermDomain a => Options -> Int -> Int -> (QName -> Bool)
                -> Int -> Int -> (Int,Int)
                -> (Int,Int) -> [(QName, ACallType a)] -> [QName]
-               -> (Int,Int) -> (String, [String])
+               -> (Int,Int,Int) -> (String, [String])
 showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
                (numpubiotypes, numalliotypes)
                (numpubcalltypes, numallcalltypes)
-               ntfinalcts withnonfailconds (numcalls, numcases) =
+               ntfinalcts withnonfailconds (numcalls, numcases, numunsats) =
   ( unlines $
       [ "Functions                      (public / all): " ++
         show numvisfuncs ++ " / " ++ show numallfuncs
@@ -49,8 +49,10 @@ showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
                 show numpubnfconds ++ " / " ++ show numallnfconds
               , "Final failing call types       (public / all): " ++
                 show numfailpubcts ++ " / " ++ show numfailallcts
-              , "Non-trivial function calls checked           : " ++
+              , "Non-trivial function calls checked (total)   : " ++
                 show numcalls
+              , "Non-trivial function calls checked by SMT    : " ++
+                show numunsats
               , "Incomplete case expressions checked          : " ++
                 show numcases
               , "Number of iterations for call-type inference : " ++
@@ -63,7 +65,7 @@ showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
              , numpubntfinalcts, numallntfinalcts
              , numpubnfconds, numallnfconds
              , numfailpubcts, numfailallcts
-             , numcalls, numcases, numits, vtime ]
+             , numcalls, numunsats, numcases, numits, vtime ]
   )
  where
   ntfinalpubcts    = filter (isvisible . fst) ntfinalcts
@@ -76,12 +78,27 @@ showStatistics opts vtime numits isvisible numvisfuncs numallfuncs
   numfailpubcts    = length (filter (isFailACallType . snd) ntfinalpubcts)
                      - numpubnfconds
 
+--- Column names of CSV statistics.
+statColumnNames :: [String]
+statColumnNames =
+  [ "Module" ] ++
+  concatMap (\s -> [s ++ " (public)", s ++ " (all)"])
+    ["Operations", "NT in/out", "Initial NT call types"
+    , "Final NT call types", "Final non-fail conditions"
+    , "Final failing"] ++
+  [ "NT fun calls checked"
+  , "NT fun calls checked by SMT"
+  , "Incomplete cases checked"
+  , "Iterations", "Total time (msecs)"
+  ]
+
 --- Store the statitics for a module in a text and a CSV file
 --- (if required by the current options).
 storeStatistics :: Options -> String -> String -> [String] -> IO ()
 storeStatistics opts mname stattxt statcsv = when (optStats opts) $ do
   reportWriting writeFile    (statsFile mname ++ ".txt") stattxt
-  reportWriting writeCSVFile (statsFile mname ++ ".csv") [mname : statcsv]
+  reportWriting writeCSVFile (statsFile mname ++ ".csv")
+                [statColumnNames, mname : statcsv]
  where
   reportWriting wf f s = do
     when (optVerb opts > 1) $ putStr $ "Storing statistics in '" ++ f ++ "'..."

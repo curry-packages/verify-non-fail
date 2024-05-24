@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 07/05/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 24/05/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -424,7 +424,9 @@ data VerifyState a = VerifyState
   , vstImpFunConds :: Map.Map QName NonFailCond -- call conditions of imports
   , vstFunConds    :: [(QName,NonFailCond)] -- call conditions of functions
   , vstNewFunConds :: [(QName,NonFailCond)] -- functions with new call conds
-  , vstStats       :: (Int,Int) -- numbers: non-trivial calls / incomplete cases
+  , vstStats       :: (Int,Int,Int)         -- number of: non-trivial calls /
+                                            -- incomplete cases /
+                                            -- SMT-checked non-trivial calls
   , vstToolOpts    :: Options
   }
 
@@ -442,7 +444,7 @@ initVerifyState pistore flatprog consinfos impacalltypes impfconds acalltypes
     showConditions (progFuncs flatprog) nonfailconds
   return $ VerifyState pistore (progName flatprog) (("",""),0,[]) consinfos 0
                        [] [] id impacalltypes nfacalltypes iotypes [] [] []
-                       impfconds nonfailconds [] (0,0) opts
+                       impfconds nonfailconds [] (0,0,0) opts
  where
   nonfailconds = unionBy (\x y -> fst x == fst y) nfconds
                          (nonFailCondsOfModule flatprog)
@@ -797,17 +799,23 @@ getFuncType qf ar
              return
              (Map.lookup qf (vstIOTypes st))
 
--- Increment number of non-trivial calls.
+-- Increment number of checks of non-trivial function calls.
 incrNonTrivialCall :: TermDomain a => VerifyStateM a ()
 incrNonTrivialCall = do
   st <- get
-  put $ st { vstStats = (\ (f,c) -> (f+1,c)) (vstStats st) }
+  put $ st { vstStats = (\ (f,c,s) -> (f+1,c,s)) (vstStats st) }
 
--- Increment number of incomplete case expressions.
+-- Increment number of checks of incomplete case expressions.
 incrIncompleteCases :: TermDomain a => VerifyStateM a ()
 incrIncompleteCases = do
   st <- get
-  put $ st { vstStats = (\ (f,c) -> (f,c+1)) (vstStats st) }
+  put $ st { vstStats = (\ (f,c,s) -> (f,c+1,s)) (vstStats st) }
+
+-- Increment number of checks of unsatisfiability with SMT.
+incrUnsatSMT :: TermDomain a => VerifyStateM a ()
+incrUnsatSMT = do
+  st <- get
+  put $ st { vstStats = (\ (f,c,s) -> (f,c,s+1)) (vstStats st) }
 
 -- Gets the tool options from the current state.
 getToolOptions :: TermDomain a => VerifyStateM a Options
@@ -996,7 +1004,7 @@ verifyFuncCall exp qf vs = do
   if qf == pre "failed" || (optError opts && qf == pre "error")
     then do
       bcond  <- getExpandedCondition
-      unsat  <- isUnsatisfiable bcond
+      unsat  <- incrUnsatSMT >> isUnsatisfiable bcond
       if unsat
         then do currfn <- getCurrentFuncName
                 printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": CALL TO " ++
@@ -1059,7 +1067,7 @@ verifyNonTrivFuncCall exp qf vs atype mbnfcond = do
                   -- check whether the negated call condition is unsatisfiable
                   -- (if yes: call condition holds)
                   implcond <- getExpandedConditionWithConj (fcNot callcond)
-                  implied  <- isUnsatisfiable implcond
+                  implied  <- incrUnsatSMT >> isUnsatisfiable implcond
                   if implied
                     then printIfVerb 2 "CALL CONDITION SATISFIED\n"
                     else addFailedFunc exp Nothing callcond)
