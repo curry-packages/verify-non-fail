@@ -55,13 +55,13 @@ is non-failing.
 
 The ideas of the implementation of this tool are described in:
 
-M. Hanus: Inferring Non-Failure Conditions for Declarative Programs,
+[M. Hanus: Inferring Non-Failure Conditions for Declarative Programs](http://dx.doi.org/10.1007/978-981-97-2300-3\_10),
 Proc. of the 17th International Symposium on Functional and Logic Programming
-(FLOPS 2024), to appear in Springer LNCS, 2024
+(FLOPS 2024), Springer LNCS 14659, pp. 167-187, 2024
 
 
-Arithmetic non-fail conditions (experimental extension!)
---------------------------------------------------------
+Arithmetic non-fail conditions
+------------------------------
 
 If the SMT solver [Z3](https://github.com/Z3Prover/z3.git) is
 installed and the executable `z3` can be found in the path,
@@ -93,17 +93,50 @@ reads a line until it is an integer):
 
 ------------------------------------------------------------------------------
 
-Installation:
--------------
+Installation
+------------
 
-The tool can be installed via the command
+If you downloaded the sources of this package, then the tool can be
+installed via the command
 
     > cypm install
 
-in the main directory of this package.
+in the main directory of this package. Otherwise, the tool can
+also be downloaded and installed by the command
+
+    > cypm install verify-non-fail
+
 This installs the executable `curry-calltypes` in the bin-directory of CPM.
 
-If one use KiCS2 to install this tool, one should use version 3.1.0
+If one uses KiCS2 to install this tool, one should use version 3.1.0
 of April 11, 2024 (or newer) due to a memory leak in an older version of KiCS2.
+
+------------------------------------------------------------------------------
+
+Files
+-----
+
+In order to support a modular analysis of applications consisting
+of several modules, the tool caches already computed analysis results
+of modules in under the directory `~/.curry_verifycache`.
+This path is defined in `Veriy.Files.getVerifyCacheDirectory`.
+To store the analysis results for different Curry systems and
+abstract domains separately, the analysis results for a Curry module
+stored in a file with path `MODULEPATH.curry` are stored in
+
+    ~/.curry_verifycache/CURRYSYSTEMID/DOMAINID/MODULEPATH-*
+
+For instance, the call types of the prelude for KiCS2 Version 3.1.0
+w.r.t. the abstract domain `Values` are stored in
+
+    ~/.curry_verifycache/kics2-3.1.0/Values/opt/kics2/lib/Prelude-CALLTYPES
+
+provided that KiCS2 is installed at `/opt/kics2` so that the prelude
+is contained in the file `/opt/kics2/lib/Prelude.curry`.
+
+All cache files (for the Curry system used to install this tool)
+can be deleted by the command
+
+    curry-calltypes --delete
 
 ------------------------------------------------------------------------------
