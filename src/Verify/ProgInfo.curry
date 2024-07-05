@@ -16,10 +16,12 @@ import Data.List          ( (\\), find )
 
 import qualified Data.Map as Map
 import FlatCurry.Build    ( fcFailed, pre )
-import FlatCurry.Files    ( readFlatCurry )
+import FlatCurry.FilesRW  ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Names    ( anonCons )
 import FlatCurry.Types
+import RW.Base
+
 import Verify.Helpers     ( fst3, trd3 )
 
 ------------------------------------------------------------------------------
@@ -82,7 +84,7 @@ type ConsInfo = (Int, ConsType, [(QName,Int)])
 --- The type of a constructor consists of the argument types, the
 --- type constructor and the type parameters of the constructor.
 data ConsType = ConsType [TypeExpr] QName [Int]
- deriving (Show, Read)
+ deriving (Show, Read, Eq)
 
 --- Transforms a list of type declarations into constructor information.
 consInfoOfTypeDecls :: [TypeDecl] -> [(QName,ConsInfo)]
@@ -194,5 +196,26 @@ getTypeDeclOf piref qtc@(mn,_) = do
   maybe (error $ "Type declaration for '" ++ show qtc ++ "' not found!")
         return
         (find (\td -> typeName td == qtc) (progTypes prog))
+
+------------------------------------------------------------------------------
+-- `ReadWrite` instance for `ConsType`.
+
+instance ReadWrite ConsType where
+  readRW strs r0 = (ConsType a' b' c',r3)
+    where
+      (a',r1) = readRW strs r0
+      (b',r2) = readRW strs r1
+      (c',r3) = readRW strs r2
+
+  showRW params strs0 (ConsType a' b' c') = (strs3,show1 . (show2 . show3))
+    where
+      (strs1,show1) = showRW params strs0 a'
+      (strs2,show2) = showRW params strs1 b'
+      (strs3,show3) = showRW params strs2 c'
+
+  writeRW params h (ConsType a' b' c') strs =
+    (writeRW params h a' strs >>= writeRW params h b') >>= writeRW params h c'
+
+  typeOf _ = monoRWType "ConsType"
 
 ------------------------------------------------------------------------------

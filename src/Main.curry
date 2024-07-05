@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 24/05/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 04/07/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()

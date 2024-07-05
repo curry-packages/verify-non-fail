@@ -4,10 +4,10 @@
 --- 
 --- The tool caches already computed analysis results about modules
 --- under the directory defined in `getVerifyCacheDirectory` which
---- is usually `~/.curry_verifycache/<CURRYSYSTEM>/...`.
+--- is usually `~/.curry_verify_cache/<CURRYSYSTEM>/...`.
 ---
 --- @author Michael Hanus
---- @version March 2024
+--- @version July 2024
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -31,12 +31,16 @@ import AbstractCurry.Types hiding ( pre )
 import Analysis.TermDomain  ( TermDomain )
 import Contract.Names       ( decodeContractName, encodeContractName )
 import Data.Time            ( ClockTime, compareClockTime )
+import Debug.Profile
 import FlatCurry.Types      ( FuncDecl )
+import FlatCurry.TypesRW
+import RW.Base              ( ReadWrite, readDataFile, writeDataFile )
 import System.CurryPath     ( currySubdir, lookupModuleSourceInLoadPath
                             , modNameToPath )
 import System.Directory
 import System.FilePath      ( (</>), (<.>), dropDrive, dropFileName, isAbsolute
                             , joinPath, splitDirectories )
+import System.IO            -- for ReadWrite instances
 import System.IOExts        ( evalCmd, readCompleteFile )
 import System.Process       ( system )
 
@@ -53,13 +57,13 @@ import Verify.ProgInfo
 -- Definition of directory and file names for various data.
 
 -- Cache directory where data files generated and used by this tool are stored.
--- If $HOME exists, it is `~/.curry_verifycache/<CURRYSYSTEM>/<DOMAINID>`.
+-- If $HOME exists, it is `~/.curry_verify_cache/<CURRYSYSTEM>/<DOMAINID>`.
 getVerifyCacheDirectory :: String -> IO String
 getVerifyCacheDirectory domainid = do
   homedir    <- getHomeDirectory
   hashomedir <- doesDirectoryExist homedir
   let maindir = if hashomedir then homedir else installDir
-  return $ maindir </> ".curry_verifycache" </>
+  return $ maindir </> ".curry_verify_cache" </>
            joinPath (tail (splitDirectories currySubdir)) </> domainid
 
 --- Delete the tool's cache directory (for the Curry system).
@@ -142,14 +146,13 @@ storeTypes opts mname fdecls consinfos acalltypes pubntcalltypes funconds
   ctfile  <- getCallTypesFile   opts mname
   nffile  <- getNonFailCondFile opts mname
   iofile  <- getIOTypesFile     opts mname
-  writeFileAndReport cifile (show consinfos)
-  writeFileAndReport ctfile
-    (unlines (map (\ ((_,fn),ct) -> show (fn,ct)) (filterMod acalltypes)))
-  writeFileAndReport nffile
-    (unlines (map (\ ((_,fn),ct) -> show (fn, filterUnknownTypes ct))
-                  (filterMod funconds)))
-  writeFileAndReport iofile
-    (unlines (map (\ ((_,fn), IOT iots) -> show (fn,iots)) (filterMod iotypes)))
+  writeTermFile opts cifile consinfos
+  writeTermFile opts ctfile
+    (map (\ ((_,fn),ct) -> (fn,ct)) (filterMod acalltypes))
+  writeTermFile opts nffile
+    (map (\ ((_,fn),ct) -> (fn, filterUnknownTypes ct)) (filterMod funconds))
+  writeTermFile opts iofile
+    (map (\ ((_,fn), IOT iots) -> (fn,iots)) (filterMod iotypes))
   when (optSpecModule opts) $
     writeSpecModule opts mname fdecls (sortFunResults pubntcalltypes)
                     (sortFunResults funconds)
@@ -160,11 +163,6 @@ storeTypes opts mname fdecls consinfos acalltypes pubntcalltypes funconds
   -- (A better solution would be the removal of all case pattern variables.)
   filterUnknownTypes :: NonFailCond -> NonFailCond
   filterUnknownTypes (vts,e) = (filter ((/=unknownType) . snd) vts, e)
-
-  writeFileAndReport f s = do
-    when (optVerb opts > 3) $ putStr $ "Writing cache file '" ++ f ++ "'..."
-    writeFile f s
-    printWhenAll opts "done"
   
   filterMod xs = filter (\ ((mn,_),_) -> mn == mname) xs
 
@@ -174,28 +172,19 @@ storeTypes opts mname fdecls consinfos acalltypes pubntcalltypes funconds
 -- module, `Nothing` is returned.
 tryReadTypes :: TermDomain a => Options -> String
   -> IO (Maybe ([(QName,ConsInfo)], [(QName,ACallType a)],
-                 [(QName,NonFailCond)], [(QName,InOutType a)]))
+                [(QName,NonFailCond)], [(QName,InOutType a)]))
 tryReadTypes opts mname = do
   cifile   <- getConsInfosFile   opts mname
   ctfile   <- getCallTypesFile   opts mname
   nffile   <- getNonFailCondFile opts mname
   iofile   <- getIOTypesFile     opts mname
-  ciexists <- doesFileExist cifile
-  ctexists <- doesFileExist ctfile
-  nfexists <- doesFileExist nffile
-  ioexists <- doesFileExist iofile
-  if not (ciexists && ctexists && ioexists && nfexists)
+  allexists <- fmap and $ mapM doesFileExist [cifile,ctfile,nffile,iofile]
+  if not allexists
     then return Nothing
     else do
       srctime <- getModuleModTime mname
-      citime  <- getModificationTime cifile
-      cttime  <- getModificationTime ctfile
-      nftime  <- getModificationTime nffile
-      iotime  <- getModificationTime iofile
-      if compareClockTime citime srctime == GT &&
-         compareClockTime cttime srctime == GT &&
-         compareClockTime nftime srctime == GT &&
-         compareClockTime iotime srctime == GT
+      ftimes  <- mapM getModificationTime [cifile,ctfile,nffile,iofile]
+      if all (\t -> compareClockTime t srctime == GT) ftimes
         then fmap Just (readTypes opts mname)
         else return Nothing
 
@@ -205,14 +194,11 @@ readTypes :: TermDomain a => Options -> String
           -> IO ([(QName,ConsInfo)], [(QName,ACallType a)],
                  [(QName,NonFailCond)], [(QName,InOutType a)])
 readTypes opts mname = do
-  cifile <- getConsInfosFile   opts mname
-  ctfile <- getCallTypesFile   opts mname
-  nffile <- getNonFailCondFile opts mname
-  iofile <- getIOTypesFile     opts mname
-  consis <- readFile cifile >>= return . read
-  cts    <- readFile ctfile >>= return . map read . lines
-  nfcs   <- readFile nffile >>= return . map read . lines
-  iots   <- readFile iofile >>= return . map read . lines
+  let reporttimings = optVerb opts > 3
+  consis <- getConsInfosFile   opts mname >>= readTermFile reporttimings
+  cts    <- getCallTypesFile   opts mname >>= readTermFile reporttimings
+  nfcs   <- getNonFailCondFile opts mname >>= readTermFile reporttimings
+  iots   <- getIOTypesFile     opts mname >>= readTermFile reporttimings
   return (consis,
           map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
           map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs,
@@ -477,4 +463,45 @@ callTypes2SpecMod mname functs =
       else string2ac $ (if null mn then "" else mn ++ ".") ++ mc
 
 ------------------------------------------------------------------------------
+-- Writes a list of data terms into a file together with another file
+-- (with suffix `.rw`) containing a compact representation.
+writeTermFile :: (ReadWrite a, Show a) => Options -> String -> a -> IO ()
+writeTermFile _ f ts = do
+  writeFile f (show ts)          -- store terms as strings
+  writeDataFile (f <.> "rw") ts  -- store terms as compact data
 
+--- Reads a file containing a list of terms. Try to read compact representation
+--- if it exists and is not older than the terms file.
+--- If the first argument is `True`, read also the term file and report
+--- the timings of reading this file and the compact data file.
+readTermFile :: (Read a, ReadWrite a, Eq a) => Bool -> String -> IO a
+readTermFile reporttimings file = do
+  let rwfile = file <.> "rw"
+      readtermfile = fmap read $ readFile file
+  rwex <- doesFileExist rwfile
+  if rwex
+    then do
+      ftime   <- getModificationTime file
+      rwftime <- getModificationTime rwfile
+      if compareClockTime rwftime ftime == LT
+        then readtermfile
+        else do
+          (mbterms,rwtime) <- getElapsedTimeNF (readDataFile rwfile)
+          maybe (error $ "Illegal data in file " ++ rwfile)
+                (\rwterms ->
+                  if not reporttimings
+                    then return rwterms
+                    else do
+                      putStrLn $ "\nReading " ++ file
+                      (terms,ttime) <- getElapsedTimeNF readtermfile
+                      putStrLn $ "Time: " ++ show ttime ++
+                                " msecs / Compact reading: " ++
+                                show rwtime ++ " msecs / speedup: " ++
+                                show (fromInt ttime / fromInt rwtime)
+                      if rwterms == terms -- safety check
+                        then return rwterms
+                        else error "Difference in compact terms!" )
+                mbterms
+    else readtermfile
+
+------------------------------------------------------------------------------

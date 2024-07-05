@@ -10,7 +10,6 @@ module Verify.CallTypes where
 import Data.List
 
 import Analysis.TermDomain ( TermDomain(..), litAsCons )
-import FlatCurry.Files
 import FlatCurry.Goodies
 import FlatCurry.Types
 

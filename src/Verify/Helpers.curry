@@ -12,9 +12,9 @@ import Analysis.ProgInfo
 import Analysis.Types
 import CASS.Server        ( analyzeGeneric, analyzePublic )
 import Data.Time          ( ClockTime )
-import FlatCurry.Files    ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Types
+import RW.Base
 import System.CurryPath   ( lookupModuleSourceInLoadPath )
 import System.Directory   ( getModificationTime )
 
@@ -26,7 +26,7 @@ import Verify.Options     ( Options, printWhenStatus )
 data AnalysisStore a = AnaStore [(String, ProgInfo a)]
 
 -- Loads CASS analysis results for a module and its imported entities.
-loadAnalysisWithImports :: (Read a, Show a) =>
+loadAnalysisWithImports :: (Read a, Show a, ReadWrite a) =>
    IORef (AnalysisStore a) -> Analysis a -> Options -> Prog -> IO (QName -> a)
 loadAnalysisWithImports anastore analysis opts prog = do
   maininfo <- getOrAnalyze (progName prog)

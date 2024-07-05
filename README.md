@@ -118,18 +118,18 @@ Files
 
 In order to support a modular analysis of applications consisting
 of several modules, the tool caches already computed analysis results
-of modules in under the directory `~/.curry_verifycache`.
-This path is defined in `Veriy.Files.getVerifyCacheDirectory`.
+of modules in under the directory `~/.curry_verify_cache`.
+This path is defined in `Verify.Files.getVerifyCacheDirectory`.
 To store the analysis results for different Curry systems and
 abstract domains separately, the analysis results for a Curry module
-stored in a file with path `MODULEPATH.curry` are stored in
+which is stored in a file with path `MODULEPATH.curry` are contained in
 
-    ~/.curry_verifycache/CURRYSYSTEMID/DOMAINID/MODULEPATH-*
+    ~/.curry_verify_cache/CURRYSYSTEMID/DOMAINID/MODULEPATH-*
 
 For instance, the call types of the prelude for KiCS2 Version 3.1.0
 w.r.t. the abstract domain `Values` are stored in
 
-    ~/.curry_verifycache/kics2-3.1.0/Values/opt/kics2/lib/Prelude-CALLTYPES
+    ~/.curry_verify_cache/kics2-3.1.0/Values/opt/kics2/lib/Prelude-CALLTYPES
 
 provided that KiCS2 is installed at `/opt/kics2` so that the prelude
 is contained in the file `/opt/kics2/lib/Prelude.curry`.
