@@ -100,7 +100,7 @@ verifyModuleIfNew :: TermDomain a => Analysis a -> IORef ProgInfo
 verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   z3exists <- fileInPath "z3"
   let z3msg = "Option '--nosmt' activated since SMT solver Z3 not found in PATH!"
-  opts <- if z3exists
+  opts <- if z3exists || not (optSMT opts0)
             then return opts0
             else do putStrLn z3msg
                     return opts0 { optSMT = False }
