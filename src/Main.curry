@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version April 2024
+--- @version July 2024
 -------------------------------------------------------------------------
 
 module Main where
@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 04/07/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 09/07/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -164,7 +164,7 @@ verifyModule valueanalysis pistore astore opts0 mname = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       printVerifyResult opts st mname isVisible
+       whenStatus opts $ printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -191,10 +191,12 @@ verifyModule valueanalysis pistore astore opts0 mname = do
           totalfuncs = filter (isTotalACallType . snd) finalacalltypes
       writeFile nfname
         (unlines (map (\((mn,fn),_) -> mn ++ " " ++ fn) totalfuncs))
-      putStrLn $ "Non-failing functions stored in '" ++ nfname ++ "'."
+      printWhenStatus opts $
+        "Non-failing functions stored in '" ++ nfname ++ "'."
       writeFile flname
         (unlines (map (\((mn,fn),_) -> mn ++ " " ++ fn) finalntacalltypes))
-      putStrLn $ "Possibly failing functions stored in '" ++ flname ++ "'."
+      printWhenStatus opts $
+        "Possibly failing functions stored in '" ++ flname ++ "'."
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
 
 --- Infer the initial (abstract) call types of all functions in a program and
