@@ -194,11 +194,10 @@ readTypes :: TermDomain a => Options -> String
           -> IO ([(QName,ConsInfo)], [(QName,ACallType a)],
                  [(QName,NonFailCond)], [(QName,InOutType a)])
 readTypes opts mname = do
-  let reporttimings = optVerb opts > 3
-  consis <- getConsInfosFile   opts mname >>= readTermFile reporttimings
-  cts    <- getCallTypesFile   opts mname >>= readTermFile reporttimings
-  nfcs   <- getNonFailCondFile opts mname >>= readTermFile reporttimings
-  iots   <- getIOTypesFile     opts mname >>= readTermFile reporttimings
+  consis <- getConsInfosFile   opts mname >>= readTermFile opts
+  cts    <- getCallTypesFile   opts mname >>= readTermFile opts
+  nfcs   <- getNonFailCondFile opts mname >>= readTermFile opts
+  iots   <- getIOTypesFile     opts mname >>= readTermFile opts
   return (consis,
           map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
           map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs,
@@ -250,7 +249,7 @@ readCallTypeFile opts mtimesrc mname = do
           printWhenStatus opts $
             "Reading previously inferred abstract call types from '" ++
             fname ++ "'..."
-          cts <- readFile fname >>= return . map read . lines
+          cts <- readTermFile opts fname
           return $ Just (map (\ (fn,ct) -> ((mname,fn), ct)) cts)
         else return Nothing
     else return Nothing
@@ -271,7 +270,7 @@ readNonFailCondFile opts mtimesrc mname = do
           printWhenStatus opts $
             "Reading previously inferred non-fail conditions from '" ++
             fname ++ "'..."
-          cts <- readFile fname >>= return . map read . lines
+          cts <- readTermFile opts fname
           return $ Just $ map (\ (fn,ct) -> ((mname,fn), ct)) cts
         else return Nothing
     else return Nothing
@@ -474,9 +473,10 @@ writeTermFile _ f ts = do
 --- if it exists and is not older than the terms file.
 --- If the first argument is `True`, read also the term file and report
 --- the timings of reading this file and the compact data file.
-readTermFile :: (Read a, ReadWrite a, Eq a) => Bool -> String -> IO a
-readTermFile reporttimings file = do
-  let rwfile = file <.> "rw"
+readTermFile :: (Read a, ReadWrite a, Eq a) => Options -> String -> IO a
+readTermFile opts file = do
+  let reporttimings = optVerb opts > 3
+      rwfile = file <.> "rw"
       readtermfile = fmap read $ readFile file
   rwex <- doesFileExist rwfile
   if rwex
