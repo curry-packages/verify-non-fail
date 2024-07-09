@@ -11,7 +11,7 @@
 -----------------------------------------------------------------------------
 
 module Verify.Files
-   ( deleteVerifyCacheDirectory
+   ( deleteVerifyCacheDirectory, typeFilesOutdated, readCallCondTypes
    , readTypesOfModules, readPublicCallTypeModule
    , readCallTypeFile, readNonFailCondFile
    , storeTypes
@@ -166,30 +166,25 @@ storeTypes opts mname fdecls consinfos acalltypes pubntcalltypes funconds
   
   filterMod xs = filter (\ ((mn,_),_) -> mn == mname) xs
 
--- Try to read constructors, call types, non-fail conditions, and
--- input/output types for a given module.
--- If the data files do not exist or are older than the source of the
--- module, `Nothing` is returned.
-tryReadTypes :: TermDomain a => Options -> String
-  -> IO (Maybe ([(QName,ConsInfo)], [(QName,ACallType a)],
-                [(QName,NonFailCond)], [(QName,InOutType a)]))
-tryReadTypes opts mname = do
+-- Check whether the files of constructors, call types, non-fail conditions, and
+-- input/output types for a given module are outdated, i.e., might not exist
+-- or are older than the source of the module.
+typeFilesOutdated :: Options -> String -> IO Bool
+typeFilesOutdated opts mname = do
   cifile   <- getConsInfosFile   opts mname
   ctfile   <- getCallTypesFile   opts mname
   nffile   <- getNonFailCondFile opts mname
   iofile   <- getIOTypesFile     opts mname
   allexists <- fmap and $ mapM doesFileExist [cifile,ctfile,nffile,iofile]
   if not allexists
-    then return Nothing
+    then return True
     else do
       srctime <- getModuleModTime mname
       ftimes  <- mapM getModificationTime [cifile,ctfile,nffile,iofile]
-      if all (\t -> compareClockTime t srctime == GT) ftimes
-        then fmap Just (readTypes opts mname)
-        else return Nothing
+      return $ any (\t -> compareClockTime t srctime == LT) ftimes
 
--- Reads constructors, abstract call types, and input/output types
--- for a given module.
+-- Reads constructors, abstract call types, non-fail conditions,
+-- and input/output types for a given module.
 readTypes :: TermDomain a => Options -> String
           -> IO ([(QName,ConsInfo)], [(QName,ACallType a)],
                  [(QName,NonFailCond)], [(QName,InOutType a)])
@@ -202,6 +197,16 @@ readTypes opts mname = do
           map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
           map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs,
           map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots)
+
+-- Reads the abstract call types and non-fail conditions
+-- for a given module.
+readCallCondTypes :: TermDomain a => Options -> String
+                  -> IO ([(QName,ACallType a)], [(QName,NonFailCond)])
+readCallCondTypes opts mname = do
+  cts    <- getCallTypesFile   opts mname >>= readTermFile opts
+  nfcs   <- getNonFailCondFile opts mname >>= readTermFile opts
+  return (map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
+          map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs)
 
 --- Reads constructors, call types, non-fail conditions, and input/output types
 --- for a given list of modules.
@@ -216,16 +221,17 @@ readTypesOfModules opts computetypes mnames = do
   (xs,ys,zs,ws) <- mapM tryRead mnames >>= return . unzip4
   return (concat xs, concat ys, concat zs, concat ws)
  where
-  tryRead mname =
-    tryReadTypes opts mname >>=
-    maybe (do printWhenStatus opts $
-                "\nVerifying imported module '" ++ mname ++ "'..."
-              computetypes opts mname
-              tryReadTypes opts mname >>=
-                maybe (error $ "Cannot read call/io types of module '" ++
-                               mname ++ "'")
-                      return)
-          return
+  tryRead mname = do
+    outdated <- typeFilesOutdated opts mname
+    if outdated
+      then do
+        printWhenStatus opts $ "\nVerifying imported module '" ++ mname ++ "'..."
+        computetypes opts mname
+        oldfs <- typeFilesOutdated opts mname
+        if oldfs
+          then error $ "Cannot read call/io types of module '" ++ mname ++ "'"
+          else readTypes opts mname
+      else readTypes opts mname
 
 --- Transforms a list of quadruples into a quadruple of lists.
 unzip4 :: [(a, b, c, d)] -> ([a], [b], [c], [d])

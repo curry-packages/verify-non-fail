@@ -22,7 +22,7 @@ import System.IO                   ( hFlush, stdout )
 import Debug.Trace ( trace )
 
 -- Imports from dependencies:
-import Analysis.Types             ( Analysis, analysisName )
+import Analysis.Types             ( Analysis, analysisName, startValue )
 import Analysis.TermDomain
 import Analysis.Values
 import Control.Monad.Trans.Class  ( lift )
@@ -92,12 +92,12 @@ main = do
   runWith analysis opts ms = do
     pistore <- newIORef emptyProgInfo
     astore  <- newIORef (AnaStore [])
-    mapM_ (runModuleAction (verifyModule analysis pistore astore opts)) ms
+    mapM_ (runModuleAction (verifyModuleIfNew analysis pistore astore opts)) ms
 
---- Verify a single module.
-verifyModule :: TermDomain a => Analysis a -> IORef ProgInfo
-             -> IORef (AnalysisStore a) -> Options -> String -> IO ()
-verifyModule valueanalysis pistore astore opts0 mname = do
+--- Verify a single module if necessary, i.e., not previously verified.
+verifyModuleIfNew :: TermDomain a => Analysis a -> IORef ProgInfo
+                  -> IORef (AnalysisStore a) -> Options -> String -> IO ()
+verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   z3exists <- fileInPath "z3"
   let z3msg = "Option '--nosmt' activated since SMT solver Z3 not found in PATH!"
   opts <- if z3exists
@@ -106,6 +106,29 @@ verifyModule valueanalysis pistore astore opts0 mname = do
                     return opts0 { optSMT = False }
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- getFlatProgFor pistore mname
+  outdatedtypes <- typeFilesOutdated opts mname
+  if outdatedtypes || optRerun opts
+    then verifyModule valueanalysis pistore astore opts mname flatprog
+    else do
+      printWhenStatus opts "Reading call types from previous verification..."
+      let fdecls       = progFuncs flatprog
+          visfuncs     = filter (\fn -> optGenerated opts || isCurryID fn)
+                                (map funcName
+                                     (filter ((== Public) . funcVisibility)
+                                             fdecls))
+          isVisible qf = Set.member qf (Set.fromList visfuncs)
+      (ctypes,nfconds) <- readCallCondTypes opts mname
+      const (printVerifyResults opts mname isVisible fdecls ctypes nfconds)
+            -- Hack: this unused expression is necessary to convince the type
+            -- checker that both expressions are parametric over the same
+            -- type variable `a`:
+            (snd (head ctypes) == Just [startValue valueanalysis])
+      return ()
+
+--- Verify a single module.
+verifyModule :: TermDomain a => Analysis a -> IORef ProgInfo
+             -> IORef (AnalysisStore a) -> Options -> String -> Prog -> IO ()
+verifyModule valueanalysis pistore astore opts mname flatprog = do
   let orgfdecls    = progFuncs flatprog
       numfdecls    = length orgfdecls
       visfuncs     = filter (\fn -> optGenerated opts || isCurryID fn)
@@ -119,7 +142,7 @@ verifyModule valueanalysis pistore astore opts0 mname = do
       then do
         whenStatus opts $ putStr $ "Reading abstract types of imports: " ++
           unwords (progImports flatprog)
-        readTypesOfModules opts (verifyModule valueanalysis pistore astore)
+        readTypesOfModules opts (verifyModuleIfNew valueanalysis pistore astore)
                            (progImports flatprog)
       else return ([],[],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
@@ -358,17 +381,24 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
 printVerifyResult :: TermDomain a => Options -> VerifyState a -> String
                   -> (QName -> Bool) -> IO ()
 printVerifyResult opts vst mname isvisible = do
+  fdecls <- currentFuncDecls vst
+  printVerifyResults opts mname isvisible fdecls
+                     (Map.toList (vstCallTypes vst)) (vstFunConds vst)
+
+printVerifyResults :: TermDomain a => Options -> String -> (QName -> Bool)
+                   -> [FuncDecl] -> [(QName,ACallType a)]
+                   -> [(QName,NonFailCond)] -> IO ()
+printVerifyResults opts mname isvisible fdecls ctypes nfconds = do
   putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
-  let calltypes = filter (\ (qf,ct) -> not (isTotalACallType ct) && showFun qf)
-                            (Map.toList (vstCallTypes vst))
-      funconds = filter (showFun . fst) (vstFunConds vst)
+  let calltypes = filter (\(qf,ct) -> not (isTotalACallType ct) && showFun qf)
+                         ctypes
+      funconds = filter (showFun . fst) nfconds
   if null calltypes
     then putStrLn "\n"
     else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
            : showFunResults prettyFunCallAType
                (sortFunResults (filter ((`notElem` (map fst funconds)) . fst)
                                        calltypes))
-  fdecls <- currentFuncDecls vst
   unless (null funconds) $
     putStrLn $ "NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:\n" ++
                showConditions fdecls (sortFunResults funconds)

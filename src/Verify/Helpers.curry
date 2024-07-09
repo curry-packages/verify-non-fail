@@ -13,10 +13,12 @@ import Analysis.Types
 import CASS.Server        ( analyzeGeneric, analyzePublic )
 import Data.Time          ( ClockTime )
 import FlatCurry.Goodies
+import FlatCurry.Files    ( flatCurryFileName )
 import FlatCurry.Types
 import RW.Base
 import System.CurryPath   ( lookupModuleSourceInLoadPath )
-import System.Directory   ( getModificationTime )
+import System.Directory   ( getModificationTime, doesFileExist )
+import System.FilePath    ( (</>) )
 
 import FlatCurry.Build
 import Verify.Options     ( Options, printWhenStatus )
@@ -62,12 +64,19 @@ showFunResults :: (a -> String) -> [(QName,a)] -> [String]
 showFunResults showf = map (\ (qf,r) -> snd qf ++ ": " ++ showf r)
 
 ------------------------------------------------------------------------------
---- Returns the modification time of a module.
+--- Returns the modification time of a module or the modification time
+--- of the corresponding FlatCurry file it it exists and is newer.
 getModuleModTime :: String -> IO ClockTime
 getModuleModTime mname =
   lookupModuleSourceInLoadPath mname >>=
   maybe (error $ "Source file of module '" ++ mname ++ "' not found!")
-        (\ (_,fn) -> getModificationTime fn)
+        (\(dir,fn) -> do
+          mtime <- getModificationTime fn
+          let fcyfile = dir </> flatCurryFileName mname
+          exfcy <- doesFileExist fcyfile
+          if exfcy then do fcytime <- getModificationTime fcyfile
+                           return (if mtime < fcytime then fcytime else mtime)
+                   else return mtime)
 
 ------------------------------------------------------------------------------
 --- Return the pattern variables of a pattern.
