@@ -55,9 +55,10 @@ is non-failing.
 
 The ideas of the implementation of this tool are described in:
 
-[M. Hanus: Inferring Non-Failure Conditions for Declarative Programs](http://dx.doi.org/10.1007/978-981-97-2300-3\_10),
-Proc. of the 17th International Symposium on Functional and Logic Programming
-(FLOPS 2024), Springer LNCS 14659, pp. 167-187, 2024
+> M. Hanus: Inferring Non-Failure Conditions for Declarative Programs,
+> Proc. of the 17th International Symposium on Functional and Logic Programming
+> (FLOPS 2024), Springer LNCS 14659, pp. 167-187, 2024,
+> DOI: [10.1007/978-981-97-2300-3\_10](http://dx.doi.org/10.1007/978-981-97-2300-3\_10),
 
 
 Arithmetic non-fail conditions
