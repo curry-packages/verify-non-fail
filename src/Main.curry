@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 09/07/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 27/08/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -1036,7 +1036,7 @@ verifyFuncCall exp qf vs = do
   if qf == pre "failed" || (optError opts && qf == pre "error")
     then do
       bcond  <- getExpandedCondition
-      unsat  <- incrUnsatSMT >> isUnsatisfiable bcond
+      unsat  <- incrNonTrivialCall >> incrUnsatSMT >> isUnsatisfiable bcond
       if unsat
         then do currfn <- getCurrentFuncName
                 printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": CALL TO " ++
