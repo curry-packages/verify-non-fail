@@ -42,6 +42,7 @@ import PackageConfig      ( getPackagePath )
 -- property (represented as FlatCurry expressions).
 -- If the implication is `False`, the unsatisfiability of the assertion
 -- is checked.
+-- `Nothing` is returned if there is some error w.r.t. SMT solving.
 checkUnsatisfiabilityWithSMT :: Options -> QName -> String -> IORef ProgInfo
           -> [(QName,ConsInfo)] -> [(Int,TypeExpr)] -> Expr -> IO (Maybe Bool)
 checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos

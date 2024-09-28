@@ -83,7 +83,7 @@ options =
            "print help and exit"
   , Option "q" ["quiet"]
            (NoArg (\opts -> opts { optVerb = 0 }))
-           "run quietly (no output, only exit code)"
+           "run quietly (show verification result only)"
   , Option "v" ["verbosity"]
             (OptArg (maybe (checkVerb 2) (safeReadNat checkVerb)) "<n>")
             "verbosity level:\n0: quiet (same as `-q')\n1: show status messages (default)\n2: show intermediate results (same as `-v')\n3: show also verification details\n4: show all details"

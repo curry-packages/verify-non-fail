@@ -187,7 +187,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       whenStatus opts $ printVerifyResult opts st mname isVisible
+       printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -221,6 +221,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
       printWhenStatus opts $
         "Possibly failing functions stored in '" ++ flname ++ "'."
   unless (null (optFunction opts)) $ showFunctionInfo opts mname vst
+  when (vstError vst) $ exitWith 1
 
 --- Infer the initial (abstract) call types of all functions in a program and
 --- return them together with the number of all/public non-trivial call types.
@@ -437,6 +438,7 @@ showIncompleteBranch qf e [] =
 -- * the list of functions marked as failing in this iteration
 -- * some statistics
 -- * the tool options
+-- * a Boolean flag which is `True` if some error occurred
 -- It is parameterized over the abstract term domain.
 data VerifyState a = VerifyState
   { vstModules     :: IORef ProgInfo    -- all infos about loaded modules
@@ -461,6 +463,7 @@ data VerifyState a = VerifyState
                                             -- incomplete cases /
                                             -- SMT-checked non-trivial calls
   , vstToolOpts    :: Options
+  , vstError       :: Bool
   }
 
 --- Initializes the verification state.
@@ -477,7 +480,7 @@ initVerifyState pistore flatprog consinfos impacalltypes impfconds acalltypes
     showConditions (progFuncs flatprog) nonfailconds
   return $ VerifyState pistore (progName flatprog) (("",""),0,[]) consinfos 0
                        [] [] id impacalltypes nfacalltypes iotypes [] [] []
-                       impfconds nonfailconds [] (0,0,0) opts
+                       impfconds nonfailconds [] (0,0,0) opts False
  where
   nonfailconds = unionBy (\x y -> fst x == fst y) nfconds
                          (nonFailCondsOfModule flatprog)
@@ -489,6 +492,12 @@ initVerifyState pistore flatprog consinfos impacalltypes impfconds acalltypes
 
 -- The type of the state monad contains the verification state.
 type VerifyStateM atype a = StateT (VerifyState atype) IO a
+
+-- Sets the name and arity of the current function in the state.
+setToolError :: TermDomain a => VerifyStateM a ()
+setToolError = do
+  st <- get
+  put $ st { vstError = True }
 
 -- Gets the function declarations of the current module.
 currentFuncDecls :: TermDomain a => VerifyState a -> IO [FuncDecl]
@@ -1398,7 +1407,7 @@ isUnsatisfiable bexp = do
       consinfos <- getConsInfos
       answer <- lift $ checkUnsatisfiabilityWithSMT (vstToolOpts st)
                          fname question (vstModules st) consinfos vtypes bexp
-      return (maybe False id answer)
+      maybe (setToolError >> return False) return answer
     else return False
 
 ------------------------------------------------------------------------------
