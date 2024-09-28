@@ -115,21 +115,21 @@ predefinedNonFailConds =
   float0 = Floatc 0
 
   sqrtcond = ([(1,fcFloat)], Comb FuncCall (pre ">=") [Var 1, Lit float0])
-  sqrtops = [ "_impl#sqrt#Prelude.Floating#Prelude.Float", "sqrt" ]
+  sqrtops = [ "_impl#sqrt#Prelude.Floating#Prelude.Float#", "sqrt" ]
 
 --- Integer division operators defined in the prelude.
 intDivOps :: [QName]
 intDivOps = map pre
-  [ "_impl#div#Prelude.Integral#Prelude.Int"
-  , "_impl#mod#Prelude.Integral#Prelude.Int"
-  , "_impl#quot#Prelude.Integral#Prelude.Int"
-  , "_impl#rem#Prelude.Integral#Prelude.Int"
+  [ "_impl#div#Prelude.Integral#Prelude.Int#"
+  , "_impl#mod#Prelude.Integral#Prelude.Int#"
+  , "_impl#quot#Prelude.Integral#Prelude.Int#"
+  , "_impl#rem#Prelude.Integral#Prelude.Int#"
   , "div", "mod", "quot", "rem" ]
 
 --- Float division operators defined in the prelude.
 floatDivOps :: [QName]
 floatDivOps = map pre
-  [ "_impl#/#Prelude.Fractional#Prelude.Float", "/" ]
+  [ "_impl#/#Prelude.Fractional#Prelude.Float#", "/" ]
 
 ------------------------------------------------------------------------------
 --- Prints a list of conditions for operations (if not empty).
@@ -159,9 +159,9 @@ genNonFailFunction (Func (mn,fn) ar vis texp _) cnd =
   nfcondvars = nub (allFreeVars nfcondexp)
 
   -- transform possible implementation of a class operation, e.g.,
-  -- `_impl#minBound#Prelude.Bounded#Prelude.Char` -> `minBound :: Char`
+  -- `_impl#minBound#Prelude.Bounded#Prelude.Char#` -> `minBound :: Char`
   transClassImplOp ct qf@(mnf,fnf) args = case splitOn "#" fnf of
-    [impl,fname,_,types] | impl == "_impl"
+    [impl,fname,_,types,_] | impl == "_impl"
        -> maybe (Comb ct (mnf,fname) args)
                 (Typed (Comb ct (mnf,fname) args))
                 (typeString2TExp types)

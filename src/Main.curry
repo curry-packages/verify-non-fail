@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version July 2024
+--- @version September 2024
 -------------------------------------------------------------------------
 
 module Main where
@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 27/08/24)"
+  bannerText = "Curry Call Pattern Verifier (Version of 28/09/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -226,7 +226,8 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
 --- return them together with the number of all/public non-trivial call types.
 --- The last argument are the already stored old call types, if they are
 --- up to date.
-inferCallTypes :: TermDomain a => Options -> [(QName,ConsInfo)] -> (QName -> Bool)
+inferCallTypes :: TermDomain a => Options -> [(QName,ConsInfo)]
+               -> (QName -> Bool)
                -> String -> ClockTime -> Prog -> Maybe [(QName,ACallType a)]
                -> IO ([(QName, ACallType a)], Int, Int)
 inferCallTypes opts consinfos isVisible mname mtime flatprog
@@ -1132,14 +1133,14 @@ checkPredefinedOp exp cont = case exp of
     -> tryCheckNumValue (intValue arg2) qf arg1 arg2 fcInt
   -- check float division:
   Comb FuncCall qf [arg1, arg2]
-    | qf == pre "_impl#/#Prelude.Fractional#Prelude.Float"
+    | qf == pre "_impl#/#Prelude.Fractional#Prelude.Float#"
     -> tryCheckNumValue (floatValue arg2) qf arg1 arg2 fcFloat
   Comb FuncCall ap1 [Comb FuncCall ap2 [Comb FuncCall qf _, arg1], arg2]
     | ap1 == apply && ap2 == apply && qf `elem` floatDivOps
     -> tryCheckNumValue (floatValue arg2) qf arg1 arg2 fcFloat
   -- check sqrt call:
   Comb FuncCall ap1 [Comb FuncCall qf [], arg]
-    | ap1 == apply && qf == pre "_impl#sqrt#Prelude.Floating#Prelude.Float"
+    | ap1 == apply && qf == pre "_impl#sqrt#Prelude.Floating#Prelude.Float#"
     -> maybe (verifyPredefinedOp qf [arg] fcFloat)
              (\x -> do unless (x >= 0) $ addFailedFunc exp Nothing fcFalse
                        return [])
@@ -1177,7 +1178,7 @@ checkPredefinedOp exp cont = case exp of
     Comb FuncCall ap [(Comb FuncCall fromint _), nexp]
        | ap == apply && fromint == pre "fromInt" -> fmap fromInt (intValue nexp)
     Comb FuncCall negFloat [fexp]
-      | negFloat == pre "_impl#negate#Prelude.Num#Prelude.Float"
+      | negFloat == pre "_impl#negate#Prelude.Num#Prelude.Float#"
                    -> fmap negate (floatValue fexp)
     _              -> Nothing
 

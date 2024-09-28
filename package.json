@@ -1,6 +1,6 @@
 {
     "name": "verify-non-fail",
-    "version": "1.2.0",
+    "version": "2.0.0",
     "author": "Michael Hanus <mh@informatik.uni-kiel.de>",
     "synopsis": "A tool to verify Curry operations as non-failing",
     "category": [ "Programming", "Analysis", "Verification" ],
@@ -8,7 +8,7 @@
     "licenseFile": "LICENSE",
     "dependencies": {
         "base"           : ">= 3.2.0, < 4.0.0",
-        "abstract-curry" : ">= 3.0.0, < 4.0.0",
+        "abstract-curry" : ">= 4.0.0, < 5.0.0",
         "cass"           : ">= 4.0.0, < 5.0.0",
         "cass-analysis"  : ">= 4.0.0, < 5.0.0",
         "containers"     : ">= 3.0.0, < 4.0.0",
@@ -20,7 +20,7 @@
         "extra"          : ">= 3.0.0, < 4.0.0",
         "filepath"       : ">= 3.0.0, < 4.0.0",
         "flatcurry"      : ">= 3.0.0, < 5.0.0",
-        "flatcurry-smt"  : "^ 1.0.0",
+        "flatcurry-smt"  : "^ 2.0.0",
         "io-extra"       : ">= 3.0.0, < 4.0.0",
         "process"        : ">= 3.0.0, < 4.0.0",
         "profiling"      : ">= 3.0.0, < 4.0.0",

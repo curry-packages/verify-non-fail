@@ -3,7 +3,7 @@
 --- In particular, it replaces calls to Eq.== implementations by Prelude.==
 ---
 --- @author  Michael Hanus
---- @version December 2023
+--- @version September 2024
 ---------------------------------------------------------------------------
 
 module FlatCurry.Simplify
@@ -68,9 +68,9 @@ simpExpr exp = case exp of
    | qf == pre "&&" && length args == 2
    = fcAnd (head args) (args!!1)
    -- simplify equality instance on lists:
-   | ct == FuncCall && qf == pre "_impl#==#Prelude.Eq#[]"
+   | ct == FuncCall && qf == pre "_impl#==#Prelude.Eq#[]#0##"
    = Comb ct (pre "==") (tail args)
-   | ct == FuncCall && qf == pre "_impl#===#Prelude.Data#[]"
+   | ct == FuncCall && qf == pre "_impl#===#Prelude.Data#[]#0##"
    = Comb ct (pre "===") (tail args)
    -- simplify equal class calls:
    | otherwise
