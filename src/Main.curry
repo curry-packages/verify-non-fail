@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version September 2024
+--- @version October 2024
 -------------------------------------------------------------------------
 
 module Main where
@@ -61,7 +61,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Call Pattern Verifier (Version of 28/09/24)"
+  bannerText = "Curry Non-Failure Verifier (Version of 08/10/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -118,7 +118,8 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
                                              fdecls))
           isVisible qf = Set.member qf (Set.fromList visfuncs)
       (ctypes,nfconds) <- readCallCondTypes opts mname
-      const (printVerifyResults opts mname isVisible fdecls ctypes nfconds)
+      const (unless (optVerb opts == 0) $
+               printVerifyResults opts mname isVisible fdecls ctypes nfconds)
             -- Hack: this unused expression is necessary to convince the type
             -- checker that both expressions are parametric over the same
             -- type variable `a`:
@@ -187,7 +188,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       printVerifyResult opts st mname isVisible
+       unless (optVerb opts == 0) $ printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -242,7 +243,7 @@ inferCallTypes opts consinfos isVisible mname mtime flatprog
   if optVerb opts > 2
     then putStrLn $ unlines $ "CONCRETE CALL TYPES OF ALL OPERATIONS:" :
            showFunResults prettyFunCallTypes calltypes
-    else when (optVerb opts > 1 || optCallTypes opts) $
+    else when (optVerb opts > 2 || optCallTypes opts) $
       putStrLn $ unlines $
         ("NON-TRIVIAL CONCRETE CALL TYPES OF " ++
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
@@ -259,7 +260,7 @@ inferCallTypes opts consinfos isVisible mname mtime flatprog
   if optVerb opts > 2
     then putStrLn $ unlines $ "ABSTRACT CALL TYPES OF ALL OPERATIONS:" :
            showFunResults prettyFunCallAType acalltypes
-    else when (optVerb opts > 1 || optCallTypes opts) $
+    else when (optVerb opts > 2 || optCallTypes opts) $
       putStrLn $ unlines $
         ("NON-TRIVIAL ABSTRACT CALL TYPES OF " ++
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
@@ -281,7 +282,7 @@ inferIOTypes opts valueanalysis astore isVisible flatprog = do
   if optVerb opts > 2
     then putStrLn $ unlines $ "INPUT/OUTPUT TYPES OF ALL OPERATIONS:" :
            showFunResults showIOT iotypes
-    else when (optVerb opts > 1 || optIOTypes opts) $
+    else when (optVerb opts > 2 || optIOTypes opts) $
       putStrLn $ unlines $
         ("NON-TRIVIAL INPUT/OUTPUT TYPES OF " ++
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
@@ -475,7 +476,7 @@ initVerifyState :: TermDomain a => IORef ProgInfo -> Prog -> [(QName,ConsInfo)]
                 -> IO (VerifyState a)
 initVerifyState pistore flatprog consinfos impacalltypes impfconds acalltypes
                 iotypes nfconds opts = do
-  unless (null nonfailconds) $ printWhenIntermediate opts $
+  unless (null nonfailconds) $ printWhenDetails opts $
     "INITIAL NON-FAIL CONDITIONS:\n" ++
     showConditions (progFuncs flatprog) nonfailconds
   return $ VerifyState pistore (progName flatprog) (("",""),0,[]) consinfos 0
@@ -908,13 +909,13 @@ verifyFuncRule vs ftype exp = do
       setCallCondition $ expandExpr (map (\(nv,(v,t)) -> (v,t,Var nv))
                                          (zip newfvars freenfcargs))  fcond)
      mbnfcond
-  printIfVerb 2 $ "CHECKING FUNCTION " ++ snd qf
+  printIfVerb 3 $ "CHECKING FUNCTION " ++ snd qf
   ctype    <- getCallType qf (length vs)
   rhstypes <- mapM (\f -> getCallType f 0) (funcsInExpr exp)
   if all isTotalACallType (ctype:rhstypes)
     then printIfVerb 2 $ "not checked since trivial"
     else maybe (maybe
-                  (printIfVerb 2 "not checked since marked as always failing")
+                  (printIfVerb 3 "not checked since marked as always failing")
                   (\_ -> do
                     setVarTypes (map (\v -> (v, [(IOT [([], anyType)], [])]))
                                      vs)
@@ -929,14 +930,14 @@ verifyFuncRule vs ftype exp = do
                   verifyExpr True exp
                   return ())
                ctype
-  printIfVerb 2 $ take 70 (repeat '-')
+  printIfVerb 3 $ take 70 (repeat '-')
 
 -- Shows the current variable expressions and types if verbosity > 2.
 showVarExpTypes :: TermDomain a => VerifyStateM a ()
 showVarExpTypes = do
   qf <- getCurrentFuncName
   opts <- getToolOptions
-  when (optVerb opts > 2) $ do
+  when (optVerb opts > 3) $ do
     st <- get
     lift $ putStr $
       "Current set of variables in function " ++ snd qf ++
@@ -997,7 +998,7 @@ verifyVarExpr ve exp = case exp of
       FuncPartCall n -> -- note: also partial calls are considered as constr.
                   do ctype <- getCallType qf (n + length es)
                      unless (isTotalACallType ctype) $ do
-                       printIfVerb 2 $ "UNSATISFIED ABSTRACT CALL TYPE: " ++
+                       printIfVerb 3 $ "UNSATISFIED ABSTRACT CALL TYPE: " ++
                          "partial application of non-total function\n"
                        addFailedFunc exp Nothing fcTrue
                      -- note: also partial calls are considered as constructors
@@ -1049,8 +1050,8 @@ verifyFuncCall exp qf vs = do
       unsat  <- incrNonTrivialCall >> incrUnsatSMT >> isUnsatisfiable bcond
       if unsat
         then do currfn <- getCurrentFuncName
-                printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": CALL TO " ++
-                             snd qf ++ showArgumentVars vs ++ " NOT REACHABLE\n"
+                printIfVerb 3 $ "FUNCTION " ++ snd currfn ++ ": CALL TO " ++
+                  snd qf ++ showArgumentVars vs ++ " NOT REACHABLE\n"
         else addFailedFunc exp Nothing fcTrue
     else do atype <- getCallType qf (length vs)
             if isTotalACallType atype 
@@ -1069,7 +1070,7 @@ verifyNonTrivFuncCall :: TermDomain a => Expr -> QName -> [Int]
 verifyNonTrivFuncCall exp qf vs atype mbnfcond = do
   incrNonTrivialCall
   currfn <- getCurrentFuncName
-  printIfVerb 2 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
+  printIfVerb 3 $ "FUNCTION " ++ snd currfn ++ ": VERIFY CALL TO " ++
                   snd qf ++ showArgumentVars vs ++
                   "\n  w.r.t. call type: " ++ prettyFunCallAType atype
   callcond <- maybe
@@ -1085,23 +1086,23 @@ verifyNonTrivFuncCall exp qf vs atype mbnfcond = do
                      map (\(nv,(v,_)) -> (v, nv)) (zip newfvars freenfcargs)
       st <- get
       let callcond0 = expandExpr (vstVarExp st) (renameAllVars rnmcvars nfcond)
-      printIfVerb 2 $ "  and call condition: " ++ showSimpExp callcond0
+      printIfVerb 3 $ "  and call condition: " ++ showSimpExp callcond0
       return callcond0)
     mbnfcond
   showVarExpTypes
   --allvts <- getVarTypes
   --printIfVerb 3 $ "Current variable types:\n" ++ showVarTypes allvts
   svts <- fmap simplifyVarTypes getVarTypes
-  printIfVerb 3 $ "Simplified variable types:\n" ++ showVarTypes svts
+  printIfVerb 4 $ "Simplified variable types:\n" ++ showVarTypes svts
   let vts = map (\v -> (v, getVarType v svts)) vs
-  printIfVerb 2 $ "Variable types in this call: " ++ printVATypes vts
+  printIfVerb 3 $ "Variable types in this call: " ++ printVATypes vts
   if subtypeOfRequiredCallType (map snd vts) atype
-    then printIfVerb 2 "CALL TYPE SATISFIED\n"
+    then printIfVerb 3 "CALL TYPE SATISFIED\n"
     else -- Check whether types of call argument variables can be made
          -- more specific to satisfy the call type. If all these variables
          -- are parameters of the current functions, specialize the
          -- call type of this function and analyze it again.
-         do printIfVerb 2 "UNSATISFIED ABSTRACT CALL TYPE\n"
+         do printIfVerb 3 "UNSATISFIED ABSTRACT CALL TYPE\n"
             maybe
               (if callcond == fcFalse
                  then addFailedFunc exp Nothing callcond
@@ -1111,10 +1112,10 @@ verifyNonTrivFuncCall exp qf vs atype mbnfcond = do
                   implcond <- getExpandedConditionWithConj (fcNot callcond)
                   implied  <- incrUnsatSMT >> isUnsatisfiable implcond
                   if implied
-                    then printIfVerb 2 "CALL CONDITION SATISFIED\n"
+                    then printIfVerb 3 "CALL CONDITION SATISFIED\n"
                     else addFailedFunc exp Nothing callcond)
               (\newvts -> do
-                 printIfVerb 2 $ "COULD BE SATISFIED BY ENSURING:\n" ++
+                 printIfVerb 3 $ "COULD BE SATISFIED BY ENSURING:\n" ++
                                  printVATypes newvts
                  addFailedFunc exp (Just newvts) fcTrue
               )
@@ -1159,7 +1160,7 @@ checkPredefinedOp exp cont = case exp of
   tryCheckNumValue mbx qf arg1 arg2 te =
     maybe (verifyPredefinedOp qf [arg1,arg2] te)
           (\z -> do if z == 0 then addFailedFunc exp Nothing fcFalse
-                              else printIfVerb 3 nonZeroOkMsg
+                              else printIfVerb 4 nonZeroOkMsg
                     verifyExpr True arg1
                     return [])
           mbx
@@ -1206,7 +1207,7 @@ verifyMissingBranches exp casevar (Branch (LPattern lit) _ : bs) = do
   let lits = lit : map (patLiteral . branchPattern) bs
   cvtype <- getVarTypes >>= return . getVarType casevar
   unless (isSubtypeOf cvtype (foldr1 lubType (map aLit lits))) $ do
-    printIfVerb 2 $ showIncompleteBranch currfn exp [] ++ "\n"
+    printIfVerb 3 $ showIncompleteBranch currfn exp [] ++ "\n"
     showVarExpTypes
     addMissingCase exp []
 verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
@@ -1228,21 +1229,21 @@ verifyMissingBranches exp casevar (Branch (Pattern qc _) _ : bs) = do
     unless (null posscs) $
       if cond == fcTrue
         then do
-          printIfVerb 2 $ showIncompleteBranch currfn exp posscs ++ "\n"
+          printIfVerb 3 $ showIncompleteBranch currfn exp posscs ++ "\n"
           showVarExpTypes
           addMissingCase exp posscs
         else do
           showVarExpTypes
           unsatcons <- fmap concat $ mapM checkMissCons posscs
           unless (null unsatcons) $ do
-            printIfVerb 2 $
+            printIfVerb 3 $
               "UNCOVERED CONSTRUCTORS: " ++ unwords (map snd unsatcons)
             setNewFunCondition currfn nfcFalse
             addMissingCase exp unsatcons
  where
   -- check whether a constructor is excluded by the current call condition:
   checkMissCons cs = do
-    printIfVerb 3 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
+    printIfVerb 4 $ "CHECKING UNREACHABILITY OF CONSTRUCTOR " ++ snd cs
     consinfos <- getConsInfos
     let iscons = transTester consinfos cs (Var casevar)
     bcond <- getExpandedCondition
@@ -1271,7 +1272,7 @@ verifyBranch casevar ve (Branch (LPattern l) e) = do
   bstate <- getBranchState
   vts  <- getVarTypes
   let branchvartypes = bindVarInIOTypes casevar (aLit l) vts
-  printIfVerb 3 $ "BRANCH WITH LITERAL '" ++ show l ++ "'"
+  printIfVerb 4 $ "BRANCH WITH LITERAL '" ++ show l ++ "'"
   addEquVarCondition casevar (Lit l)
   if isEmptyType (getVarType casevar branchvartypes)
     then return [] -- unreachable branch
@@ -1295,7 +1296,7 @@ verifyBranch casevar ve (Branch (Pattern qc vs) e) = do
   -- add single case for case variable and pattern to the current condition:
   if null vs then addEquVarCondition casevar (Comb ConsCall qc [])
              else addSingleCase casevar qc vs
-  printIfVerb 3 $ "BRANCH WITH CONSTRUCTOR '" ++ snd qc ++ "'"
+  printIfVerb 4 $ "BRANCH WITH CONSTRUCTOR '" ++ snd qc ++ "'"
   showVarExpTypes
   if isEmptyType casevartype
     then do restoreBranchState bstate

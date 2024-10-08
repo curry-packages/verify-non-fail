@@ -3,12 +3,12 @@
 --- related operations.
 ---
 --- @author Michael Hanus
---- @version December 2023
+--- @version October 2024
 -------------------------------------------------------------------------
 
 module Verify.Options
   ( Options(..), defaultOptions, processOptions
-  , whenStatus, printWhenStatus, printWhenIntermediate, printWhenDetails
+  , whenStatus, printWhenStatus, printWhenDetails
   , printWhenAll
   )
  where
@@ -86,7 +86,7 @@ options =
            "run quietly (show verification result only)"
   , Option "v" ["verbosity"]
             (OptArg (maybe (checkVerb 2) (safeReadNat checkVerb)) "<n>")
-            "verbosity level:\n0: quiet (same as `-q')\n1: show status messages (default)\n2: show intermediate results (same as `-v')\n3: show also verification details\n4: show all details"
+            "verbosity level:\n0: quiet (same as `-q')\n1: show verification result (default)\n2: show status messages (same as `-v')\n3: show also verification details\n4: show all details"
   , Option "a" ["all"]
             (NoArg (\opts -> opts { optPublic = False }))
            "show types of all (also private) operations"
@@ -165,14 +165,10 @@ options =
 -------------------------------------------------------------------------
 
 whenStatus :: Options -> IO () -> IO ()
-whenStatus opts = when (optVerb opts > 0)
+whenStatus opts = when (optVerb opts > 1)
 
 printWhenStatus :: Options -> String -> IO ()
 printWhenStatus opts s = whenStatus opts (printWT s)
-
-printWhenIntermediate :: Options -> String -> IO ()
-printWhenIntermediate opts s =
-  when (optVerb opts > 1) (printWT s)
 
 printWhenDetails :: Options -> String -> IO ()
 printWhenDetails opts s =
