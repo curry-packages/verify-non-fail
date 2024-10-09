@@ -147,7 +147,10 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
       then do
         whenStatus opts $ putStr $ "Reading abstract types of imports: " ++
           unwords (progImports flatprog)
-        readTypesOfModules opts (verifyModuleIfNew valueanalysis pistore astore)
+        -- use quiet mode for imports when showing only verification results:
+        let impopts = if optVerb opts == 1 then opts { optVerb = 0 } else opts
+        readTypesOfModules impopts
+                           (verifyModuleIfNew valueanalysis pistore astore)
                            (progImports flatprog)
       else return ([],[],[],[])
   if optTime opts then do whenStatus opts $ putStr "..."
@@ -398,14 +401,14 @@ printVerifyResults :: TermDomain a => Options -> String -> (QName -> Bool)
                    -> [FuncDecl] -> [(QName,ACallType a)]
                    -> [(QName,NonFailCond)] -> IO ()
 printVerifyResults opts mname isvisible fdecls ctypes nfconds
+  | optVerb opts == 0
+  = return ()
   | optFormat opts == FormatJSON
   = putStrLn $ ppJSON $ JArray $
       map callAType2JSON (sortFunResults (filter (showFun . fst) ctypes))
   | optFormat opts == FormatXML
   = putStrLn $ showXmlDoc $ xml "results" $
       map callAType2XML (sortFunResults (filter (showFun . fst) ctypes))
-  | optVerb opts == 0
-  = return ()
   | otherwise
   = do
     putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
@@ -949,7 +952,7 @@ verifyFuncRule vs ftype exp = do
   ctype    <- getCallType qf (length vs)
   rhstypes <- mapM (\f -> getCallType f 0) (funcsInExpr exp)
   if all isTotalACallType (ctype:rhstypes)
-    then printIfVerb 2 $ "not checked since trivial"
+    then printIfVerb 3 $ "not checked since trivial"
     else maybe (maybe
                   (printIfVerb 3 "not checked since marked as always failing")
                   (\_ -> do
