@@ -22,13 +22,15 @@
         "flatcurry"      : ">= 3.0.0, < 5.0.0",
         "flatcurry-smt"  : "^ 2.0.0",
         "io-extra"       : ">= 3.0.0, < 4.0.0",
+        "json"           : ">= 3.0.0, < 4.0.0",
         "process"        : ">= 3.0.0, < 4.0.0",
         "profiling"      : ">= 3.0.0, < 4.0.0",
         "rw-data"        : ">= 1.0.0",
         "scc"            : ">= 3.0.0, < 4.0.0",
         "time"           : ">= 3.0.0, < 4.0.0",
         "transformers"   : ">= 3.0.0, < 4.0.0",
-        "wl-pprint"      : ">= 3.0.0, < 4.0.0"
+        "wl-pprint"      : ">= 3.0.0, < 4.0.0",
+        "xml"            : ">= 3.0.0, < 4.0.0"
     },
     "configModule": "PackageConfig",
     "executable": {

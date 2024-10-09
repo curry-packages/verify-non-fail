@@ -8,6 +8,7 @@
 module FlatCurry.Print
  where
 
+import FlatCurry.Goodies
 import FlatCurry.Pretty as FCP
 import FlatCurry.Types
 import Text.Pretty                ( Doc, (<+>), align, pPrint, text )
@@ -36,9 +37,16 @@ showExp = pPrint . ppExp
 ppExp :: Expr -> Doc
 ppExp = FCP.ppExp defaultOptions { qualMode = QualNone}
 
---- Pretty prints a FlatCurry expression.
+--- Pretty prints a FlatCurry function.
 showFuncDecl :: FuncDecl -> String
 showFuncDecl =
   pPrint . ppFuncDecl defaultOptions { qualMode = QualNone}
+
+--- Pretty prints a FlatCurry function as a lambda expression.
+showFuncDeclAsLambda :: FuncDecl -> String
+showFuncDeclAsLambda fdecl =
+  let rule = funcRule fdecl
+  in '\\' : unwords (map (\i -> 'v' : show i) (ruleArgs rule)) ++
+     " -> " ++ showExp (ruleBody rule)
 
 ------------------------------------------------------------------------------

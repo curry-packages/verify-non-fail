@@ -37,12 +37,15 @@ import FlatCurry.Names
 import FlatCurry.NormalizeLet
 import FlatCurry.Print
 import FlatCurry.Types
+import JSON.Data
+import JSON.Pretty                ( ppJSON )
 import System.CurryPath           ( runModuleAction )
 import System.Directory           ( createDirectoryIfMissing, doesFileExist
                                   , removeDirectory )
 import System.FilePath            ( (</>) )
 import System.Path                ( fileInPath )
 import System.Process             ( exitWith )
+import XML
 
 -- Imports from package modules:
 import FlatCurry.Build
@@ -61,7 +64,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 08/10/24)"
+  bannerText = "Curry Non-Failure Verifier (Version of 09/10/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -90,6 +93,7 @@ main = do
                 else error "Unknown analysis domain ID!"
  where
   runWith analysis opts ms = do
+    printWhenStatus opts banner
     pistore <- newIORef emptyProgInfo
     astore  <- newIORef (AnaStore [])
     mapM_ (runModuleAction (verifyModuleIfNew analysis pistore astore opts)) ms
@@ -107,7 +111,7 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- getFlatProgFor pistore mname
   outdatedtypes <- typeFilesOutdated opts mname
-  if outdatedtypes || optRerun opts
+  if outdatedtypes || optRerun opts || not (null (optFunction opts))
     then verifyModule valueanalysis pistore astore opts mname flatprog
     else do
       printWhenStatus opts "Reading call types from previous verification..."
@@ -116,10 +120,10 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
                                 (map funcName
                                      (filter ((== Public) . funcVisibility)
                                              fdecls))
-          isVisible qf = Set.member qf (Set.fromList visfuncs)
+          visfuncset   = Set.fromList visfuncs
+          isVisible qf = Set.member qf visfuncset
       (ctypes,nfconds) <- readCallCondTypes opts mname
-      const (unless (optVerb opts == 0) $
-               printVerifyResults opts mname isVisible fdecls ctypes nfconds)
+      const (printVerifyResults opts mname isVisible fdecls ctypes nfconds)
             -- Hack: this unused expression is necessary to convince the type
             -- checker that both expressions are parametric over the same
             -- type variable `a`:
@@ -188,7 +192,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       unless (optVerb opts == 0) $ printVerifyResult opts st mname isVisible
+       printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts) $ putStrLn $
@@ -388,25 +392,57 @@ printVerifyResult opts vst mname isvisible = do
   printVerifyResults opts mname isvisible fdecls
                      (Map.toList (vstCallTypes vst)) (vstFunConds vst)
 
+------------------------------------------------------------------------------
+-- Print the verification results in the required format.
 printVerifyResults :: TermDomain a => Options -> String -> (QName -> Bool)
                    -> [FuncDecl] -> [(QName,ACallType a)]
                    -> [(QName,NonFailCond)] -> IO ()
-printVerifyResults opts mname isvisible fdecls ctypes nfconds = do
-  putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
-  let calltypes = filter (\(qf,ct) -> not (isTotalACallType ct) && showFun qf)
-                         ctypes
-      funconds = filter (showFun . fst) nfconds
-  if null calltypes
-    then putStrLn "\n"
-    else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
-           : showFunResults prettyFunCallAType
-               (sortFunResults (filter ((`notElem` (map fst funconds)) . fst)
-                                       calltypes))
-  unless (null funconds) $
-    putStrLn $ "NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:\n" ++
-               showConditions fdecls (sortFunResults funconds)
+printVerifyResults opts mname isvisible fdecls ctypes nfconds
+  | optFormat opts == FormatJSON
+  = putStrLn $ ppJSON $ JArray $
+      map callAType2JSON (sortFunResults (filter (showFun . fst) ctypes))
+  | optFormat opts == FormatXML
+  = putStrLn $ showXmlDoc $ xml "results" $
+      map callAType2XML (sortFunResults (filter (showFun . fst) ctypes))
+  | optVerb opts == 0
+  = return ()
+  | otherwise
+  = do
+    putStr $ "MODULE '" ++ mname ++ "' VERIFIED"
+    let calltypes = filter (\(qf,ct) -> not (isTotalACallType ct) && showFun qf)
+                           ctypes
+        funconds = filter (showFun . fst) nfconds
+    if null calltypes
+      then putStrLn "\n"
+      else putStrLn $ unlines $ " W.R.T. NON-TRIVIAL ABSTRACT CALL TYPES:"
+             : showFunResults prettyFunCallAType
+                 (sortFunResults (filter ((`notElem` (map fst funconds)) . fst)
+                                         calltypes))
+    unless (null funconds) $
+      putStrLn $ "NON-FAIL CONDITIONS FOR OTHERWISE FAILING FUNCTIONS:\n" ++
+                 showConditions fdecls (sortFunResults funconds)
  where
   showFun qf = not (optPublic opts) || isvisible qf
+
+  callAType2JSON (qf@(mn,fn),fct) =
+    JObject [("module", JString mn),
+             ("name"  , JString fn),
+             ("result", JString (showCallATypeOrNonFailCond qf fct))]
+             
+  callAType2XML (qf@(mn,fn),fct) =
+    xml "operation" [xml "module" [xtxt mn],
+                     xml "name"   [xtxt fn],
+                     xml "result" [xtxt (showCallATypeOrNonFailCond qf fct)]]
+             
+  showCallATypeOrNonFailCond qf ct =
+    maybe
+      (showCallAType ct)
+      (\nfc -> showFuncDeclAsLambda (snd (genNonFailFunction fdecls (qf,nfc))))
+      (lookup qf nfconds)
+
+  showCallAType ct | isTotalACallType ct = "FAIL-FREE"
+                   | isFailACallType ct  = "FAILING"
+                   | otherwise           = prettyFunCallAType ct
 
 -- Shows a message about an incomplete branch.
 -- If the third argument is the empty list, it is a literal branch.

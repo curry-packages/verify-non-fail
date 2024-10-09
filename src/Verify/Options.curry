@@ -7,7 +7,7 @@
 -------------------------------------------------------------------------
 
 module Verify.Options
-  ( Options(..), defaultOptions, processOptions
+  ( OutputFormat(..), Options(..), defaultOptions, processOptions
   , whenStatus, printWhenStatus, printWhenDetails
   , printWhenAll
   )
@@ -18,7 +18,7 @@ import Curry.Compiler.Distribution ( curryCompiler, curryCompilerMajorVersion
                                    , curryCompilerRevisionVersion )
 
 import Control.Monad         ( when, unless )
-import Data.Char             ( toUpper )
+import Data.Char             ( toLower )
 import Data.List             ( intercalate )
 import Numeric               ( readNat )
 import System.Console.GetOpt
@@ -26,6 +26,12 @@ import System.Console.GetOpt
 import System.CurryPath      ( stripCurrySuffix )
 import System.IO             ( hFlush, stdout )
 import System.Process        ( exitWith )
+
+-------------------------------------------------------------------------
+
+--- The type of supported output formats of verification results.
+data OutputFormat = FormatText | FormatJSON | FormatXML
+ deriving Eq
 
 data Options = Options
   { optVerb        :: Int  -- verbosity (0: quiet, 1: status, 2: intermediate,
@@ -35,6 +41,7 @@ data Options = Options
   , optImports     :: Bool -- read/analyze imports/prelude? (only for testing)
   , optDeleteCache :: Bool -- delete the analysis cache?
   , optEnforceNF   :: Bool -- eval data to normal form (to avoid mem leaks)?
+  , optFormat      :: OutputFormat -- output format of verification resuls
   , optRerun       :: Bool -- rerun verification of current module
   , optPublic      :: Bool -- show types (call, in/out) of public ops only? 
   , optGenerated   :: Bool -- show types (call, in/out) of generated operations? 
@@ -54,8 +61,8 @@ data Options = Options
 --- The default options of the verification tool.
 defaultOptions :: Options
 defaultOptions =
-  Options 1 False "" True False False False True True False False True True
-          False False False False False False ""
+  Options 1 False "" True False False FormatText False True True False False
+          True True False False False False False False ""
 
 --- Process the actual command line argument and return the options
 --- and the name of the main program.
@@ -90,9 +97,6 @@ options =
   , Option "a" ["all"]
             (NoArg (\opts -> opts { optPublic = False }))
            "show types of all (also private) operations"
-  , Option "" ["nogenerated"]
-            (NoArg (\opts -> opts { optGenerated = False }))
-           "do not show types of generated operations"
   , Option "c" ["calltypes"]
             (NoArg (\opts -> opts { optCallTypes = True }))
            "show call types"
@@ -105,12 +109,18 @@ options =
   , Option "e" ["error"]
            (NoArg (\opts -> opts { optError = True }))
            "consider 'Prelude.error' as a failing operation"
+  , Option "" ["format"]
+           (ReqArg checkFormat "<f>")
+           "output format: Text (default) | JSON | XML"
   , Option "f" ["function"]
             (ReqArg (\s opts -> opts { optFunction = s }) "<f>")
             "show the call and in/out type for function <f>"
   , Option "i" ["iotypes"]
             (NoArg (\opts -> opts { optIOTypes = True }))
            "show input/output types"
+  , Option "" ["nogenerated"]
+            (NoArg (\opts -> opts { optGenerated = False }))
+           "do not show types of generated operations"
   , Option "" ["noimports"]
            (NoArg (\opts -> opts { optImports = False }))
            "do not read/analyze imported modules (for testing)"
@@ -150,6 +160,12 @@ options =
   checkVerb n opts = if n >= 0 && n <= 4
                        then opts { optVerb = n }
                        else error "Illegal verbosity level (try `-h' for help)"
+
+  checkFormat s opts =
+    maybe (error $ "Illegal format value: " ++ s)
+          (\f -> opts { optFormat = f })
+          (lookup (map toLower s)
+             [("text",FormatText), ("json", FormatJSON), ("xml",FormatXML)])
 
   checkDomain s opts =
     if s `elem` ["Values", "Values2", "Values5"]
