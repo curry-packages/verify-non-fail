@@ -411,13 +411,9 @@ writeSpecModule opts mname fdecls pubntcalltypes funconds = do
       let ctmod = callTypeCond2SpecMod mname fdecls pubntcalltypes funconds
       unless (oldctmod == ctmod || not (optSpecModule opts)) $ do
         writeFile ctfile ctmod
-        --includepath <- fmap (</> "include") getPackagePath
         printWhenStatus opts $
           "A Curry module '" ++ ctmname ++ "' with required call types\n" ++
           "and non-fail conditions is written to: '" ++ ctfile ++ "'.\n" -- ++
-          --"To use it for future verifications, store this module\n" ++
-          --"- either under '" ++ includepath ++ "'\n" ++
-          --"- or in the source directory of module '" ++ mname ++ "'\n"
 
 --- Transforms call types and non-fail condition into human-readable
 --- Curry programan.

@@ -16,6 +16,7 @@ import Data.List         ( (\\), find, init, isPrefixOf, last, maximum, nub
 import Data.Maybe        ( catMaybes, fromMaybe, isJust )
 import Numeric           ( readHex )
 import System.CPUTime    ( getCPUTime )
+import System.Directory  ( doesFileExist )
 import Debug.Trace
 
 import Control.Monad.Trans.State
@@ -144,11 +145,10 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
               , CheckSat
               ]
   --putStrLn $ "SMT commands as Curry term:\n" ++ show smt
-  pp <- getPackagePath
-  smtprelude <- readFile (pp </> "include" </>
-                          if all ((`elem` defaultSMTTypes) . snd) primtypes
-                            then "Prelude_min.smt"
-                            else "Prelude.smt")
+  let preludesmt = if all ((`elem` defaultSMTTypes) . snd) primtypes
+                     then "Prelude_min.smt"
+                     else "Prelude.smt"
+  smtprelude <- readIncludeFile preludesmt
   let scripttitle = unlines (map ("; "++) (lines title))
   printWhenAll opts $
     "RAW SMT SCRIPT:\n" ++ scripttitle ++ "\n\n" ++ showSMTRaw smt
@@ -178,6 +178,23 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
         execcmt = unwords $ ["; Run with: z3"] ++ z3opts ++ [outfile]
     writeFile outfile (execcmt ++ "\n\n" ++ script)
     return outfile
+
+--- Try to read a file in the `include` directory of the package
+--  or, if this does not exists, in a local `include` directory.
+readIncludeFile :: String -> IO String
+readIncludeFile incfile = do
+  ppinclude <- fmap (</> "include" </> incfile) getPackagePath
+  exppinclude <- doesFileExist ppinclude
+  if exppinclude
+    then readFile ppinclude
+    else do
+      let localinclude = "include" </> incfile
+      exlocalinclude <- doesFileExist localinclude
+      if exlocalinclude
+        then readFile localinclude
+        else do putStrLn $ "Warning: " ++ localinclude ++ " not found!\n" ++
+                           "SMT script might be incomplete!"
+                return ""
 
 -- Translate a typed variable into an SMT declaration:
 typedVar2SMT :: (Int,TypeExpr) -> Command
