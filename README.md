@@ -119,7 +119,7 @@ Web Demo Installation
 
 If you want to try this tool on simple programs via a web interface,
 you can use a
-[Web Demo Installation](https://cpm.curry-lang.org/webinstall/failfree/)
+[Web Demo Installation](https://cpm.curry-lang.org/webapps/failfree/)
 of this tool.
 
 ------------------------------------------------------------------------------
