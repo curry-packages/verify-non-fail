@@ -1,11 +1,11 @@
-verify-non-fail: A tool to verify Curry operations as non-failing
-=================================================================
+A tool to verify Curry operations as non-failing
+================================================
 
 This package contains a tool to verify that all operations
-in a given module are non-failing, i.e., their evaluation does
+in a given Curry module are non-failing, i.e., their evaluation does
 not result in a failure, if they are called with appropriate
 arguments. The tool automatically infers abstract call types
-specifying supersets of appropriate arguments.
+and non-fail conditions specifying supersets of appropriate arguments.
 
 As an example, consider the following operation to compute the last element
 of a given list:
@@ -111,6 +111,16 @@ This installs the executable `curry-calltypes` in the bin-directory of CPM.
 
 If one uses KiCS2 to install this tool, one should use version 3.1.0
 of April 11, 2024 (or newer) due to a memory leak in an older version of KiCS2.
+
+------------------------------------------------------------------------------
+
+Web Demo Installation
+---------------------
+
+If you want to try this tool on simple programs via a web interface,
+you can use a
+[Web Demo Installation](https://cpm.curry-lang.org/webinstall/failfree/)
+of this tool.
 
 ------------------------------------------------------------------------------
 
