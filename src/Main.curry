@@ -64,7 +64,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 09/10/24)"
+  bannerText = "Curry Non-Failure Verifier (Version of 24/10/24)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -198,7 +198,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
        printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
-       when (optTime opts) $ putStrLn $
+       when (optTime opts && optVerb opts > 0) $ putStrLn $
          "TOTAL VERIFICATION TIME: " ++ show tdiff ++ " msec"
        return (numits, tdiff, st)
      else return (0, 0, vstate)
