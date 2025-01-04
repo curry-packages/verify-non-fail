@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version October 2024
+--- @version January 2025
 -------------------------------------------------------------------------
 
 module Main where
@@ -17,7 +17,7 @@ import Data.IORef
 import Data.List
 import Data.Maybe                  ( isNothing )
 import System.Environment          ( getArgs )
-import System.IO                   ( hFlush, stdout )
+import System.IO                   ( hFlush, hPutStrLn, stderr, stdout )
 
 import Debug.Trace ( trace )
 
@@ -64,7 +64,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 24/10/24)"
+  bannerText = "Curry Non-Failure Verifier (Version of 04/01/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -106,7 +106,7 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   let z3msg = "Option '--nosmt' activated since SMT solver Z3 not found in PATH!"
   opts <- if z3exists || not (optSMT opts0)
             then return opts0
-            else do putStrLn z3msg
+            else do hPutStrLn stderr z3msg
                     return opts0 { optSMT = False }
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- getFlatProgFor pistore mname
