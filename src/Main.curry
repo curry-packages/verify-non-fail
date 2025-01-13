@@ -438,14 +438,9 @@ printVerifyResults opts mname isvisible fdecls ctypes nfconds
                      xml "result" [xtxt (showCallATypeOrNonFailCond qf fct)]]
              
   showCallATypeOrNonFailCond qf ct =
-    maybe
-      (showCallAType ct)
-      (\nfc -> showFuncDeclAsLambda (snd (genNonFailFunction fdecls (qf,nfc))))
-      (lookup qf nfconds)
-
-  showCallAType ct | isTotalACallType ct = "FAIL-FREE"
-                   | isFailACallType ct  = "FAILING"
-                   | otherwise           = prettyFunCallAType ct
+    maybe ("0:" ++ show ct)
+          (\nfc -> "1:" ++ show (snd (genNonFailFunction fdecls (qf,nfc))))
+          (lookup qf nfconds)
 
 -- Shows a message about an incomplete branch.
 -- If the third argument is the empty list, it is a literal branch.
