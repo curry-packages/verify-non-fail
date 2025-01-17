@@ -2,7 +2,7 @@
 --- Operations to show and store statistical information about the analysis.
 ---
 --- @author Michael Hanus
---- @version October 2024
+--- @version January 2025
 -----------------------------------------------------------------------------
 
 module Verify.Statistics ( showStatistics, storeStatistics )
@@ -101,7 +101,8 @@ storeStatistics opts mname stattxt statcsv = when (optStats opts) $ do
                 [statColumnNames, mname : statcsv]
  where
   reportWriting wf f s = do
-    when (optVerb opts > 2) $ putStr $ "Storing statistics in '" ++ f ++ "'..."
+    when (optVerb opts > 2) $
+      printInfoLine $ "Storing statistics in '" ++ f ++ "'..."
     wf f s
     printWhenDetails opts "done"
 

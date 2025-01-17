@@ -3,13 +3,13 @@
 --- related operations.
 ---
 --- @author Michael Hanus
---- @version October 2024
+--- @version January 2025
 -------------------------------------------------------------------------
 
 module Verify.Options
   ( OutputFormat(..), Options(..), defaultOptions, processOptions
   , whenStatus, printWhenStatus, printWhenDetails
-  , printWhenAll
+  , printWhenAll, printInfoString, printInfoLine
   )
  where
 
@@ -24,7 +24,7 @@ import Numeric               ( readNat )
 import System.Console.GetOpt
 
 import System.CurryPath      ( stripCurrySuffix )
-import System.IO             ( hFlush, stdout )
+import System.IO             ( hFlush, hPutStrLn, stderr )
 import System.Process        ( exitWith )
 
 -------------------------------------------------------------------------
@@ -180,22 +180,32 @@ options =
 
 -------------------------------------------------------------------------
 
+--- Return second argument of verbosity is at least status.
 whenStatus :: Options -> IO () -> IO ()
 whenStatus opts = when (optVerb opts > 1)
 
+--- Print line on stderr if verbosity is at least status.
 printWhenStatus :: Options -> String -> IO ()
-printWhenStatus opts s = whenStatus opts (printWT s)
+printWhenStatus opts s = whenStatus opts (printInfoLine s)
 
+--- Print line on stderr if verbosity is at least "show verification details".
 printWhenDetails :: Options -> String -> IO ()
 printWhenDetails opts s =
- when (optVerb opts > 2) (printWT s)
+ when (optVerb opts > 2) (printInfoLine s)
 
+--- Print line on stderr if verbosity is "show all details".
 printWhenAll :: Options -> String -> IO ()
 printWhenAll opts s =
- when (optVerb opts > 3) (printWT s)
+ when (optVerb opts > 3) (printInfoLine s)
 
-printWT :: String -> IO ()
-printWT s = do putStrLn $ s --"NON-FAIL INFERENCE: " ++ s
-               hFlush stdout
+--- Print string on stderr.
+printInfoString :: String -> IO ()
+printInfoString s = do hPutStrLn stderr s
+                       hFlush stderr
+
+--- Print (tool info) line on stderr.
+printInfoLine :: String -> IO ()
+printInfoLine s = do hPutStrLn stderr $ s --"NON-FAIL INFERENCE: " ++ s
+                     hFlush stderr
 
 ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 --- which adds `Typed` expressions to variables/function/constructor calls.
 ---
 --- @author  Michael Hanus
---- @version March 2024
+--- @version January 2025
 ---------------------------------------------------------------------------
 
 module FlatCurry.AddTypes
@@ -21,6 +21,7 @@ import FlatCurry.Read     ( readFlatCurryWithImports )
 import FlatCurry.Simplify ( simpExpr )
 import FlatCurry.Types
 
+import Verify.Options     ( printInfoLine ) 
 import Verify.ProgInfo
 
 testAddTypes :: String -> IO ()
@@ -31,7 +32,7 @@ testAddTypes mname = do
 testAddTypesWithProgs :: String -> [(String,ModInfo)] -> IO ()
 testAddTypesWithProgs mname progs = do
   let st = transInfoFrom progs defaultAddTypeOptsPoly
-  putStrLn $ showFlatProg (evalState (addTypes2Module mname) st)
+  printInfoLine $ showFlatProg (evalState (addTypes2Module mname) st)
 
 addTypes2FuncDecls :: [(String,ModInfo)] -> [FuncDecl] -> [FuncDecl]
 addTypes2FuncDecls modinfos fdecls =

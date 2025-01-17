@@ -7,7 +7,7 @@
 --- is usually `~/.curry_verify_cache/<CURRYSYSTEM>/...`.
 ---
 --- @author Michael Hanus
---- @version July 2024
+--- @version January 2025
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -494,12 +494,12 @@ readTermFile opts file = do
                   if not reporttimings
                     then return rwterms
                     else do
-                      putStrLn $ "\nReading " ++ file
+                      printInfoLine $ "\nReading " ++ file
                       (terms,ttime) <- getElapsedTimeNF readtermfile
-                      putStrLn $ "Time: " ++ show ttime ++
-                                " msecs / Compact reading: " ++
-                                show rwtime ++ " msecs / speedup: " ++
-                                show (fromInt ttime / fromInt rwtime)
+                      printInfoLine $ "Time: " ++ show ttime ++
+                                      " msecs / Compact reading: " ++
+                                      show rwtime ++ " msecs / speedup: " ++
+                                      show (fromInt ttime / fromInt rwtime)
                       if rwterms == terms -- safety check
                         then return rwterms
                         else error "Difference in compact terms!" )

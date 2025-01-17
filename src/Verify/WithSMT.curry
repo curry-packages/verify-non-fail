@@ -2,7 +2,7 @@
 --- Some operations to translate FlatCurry operations into SMT assertions.
 ---
 --- @author  Michael Hanus
---- @version March 2024
+--- @version January 2025
 ---------------------------------------------------------------------------
 
 module Verify.WithSMT
@@ -52,15 +52,15 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
       (cnames,fnames) = both nub
                              (partitionEithers (allQNamesInExp assertionexp))
       cnamesreq = filter (`notElem` [pre "False", pre "True", anonCons]) cnames
-  --putStrLn $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
-  --putStrLn $ "NAMES IN ASSERTION: " ++ show (cnamesreq ++ fnames)
+  --printInfoLine $ "ASSERTION EXPRESSION: " ++ showExp assertionexp
+  --printInfoLine $ "NAMES IN ASSERTION: " ++ show (cnamesreq ++ fnames)
   loadModulesForQNames opts pistore (cnamesreq ++ fnames)
   pinfos <- fmap progInfos $ readIORef pistore
   let typedassertion = addTypes2VarExp pinfos vartypes assertionexp fcBool
-  --putStrLn $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedassertion
+  --printInfoLine $ "TYPED ASSERTION EXPRESSION: " ++ showExp typedassertion
   let foassertexp   = replaceHigherOrderInExp (simpExpr typedassertion)
       foassertfuncs = rights (allQNamesInExp foassertexp)
-  --putStrLn $ "SIMPLE TYPED ASSERTION EXPRESSION: " ++ showExp foassertexp
+  --printInfoLine $ "SIMPLE TYPED ASSERTION EXPRESSION: " ++ showExp foassertexp
   maybe
     (transExpError typedassertion)
     (\ (assertion,varsorts) ->
@@ -70,7 +70,7 @@ checkUnsatisfiabilityWithSMT opts qf scripttitle pistore consinfos
     (exp2SMTWithVars (maximum (0 : map fst vartypes))
                      Nothing foassertexp)
  where
-  transExpError e = do putStrLn $ "Cannot translate expression:\n" ++ showExp e
+  transExpError e = do printInfoLine $ "Cannot translate expression:\n" ++ showExp e
                        return Nothing
 
   -- Wrap all case arguments with the identity operation.
@@ -103,13 +103,13 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
       -- reduce to functions reachable from assertion after eliminating h.o.:
       fdecls  = usedFunctions assertfuncs
                   (map (updFuncBody replaceHigherOrderInExp) fdecls1)
-  --putStrLn $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
+  --printInfoLine $ "OPERATIONS TO BE TRANSLATED:\n" ++ unlines (map showFuncDecl fdecls)
   let smtfuncs = maybe (Comment $ "ERROR translating " ++
                                   show (map funcName fdecls))
                        (\fds -> DefineSigsRec fds)
                        (mapM fun2SMT fdecls)
       fdecltvars = nub (concatMap allTVarsInFuncDecl fdecls)
-  --putStrLn $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
+  --printInfoLine $ "TRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
   --let title1 = title ++ "\nTRANSLATED FUNCTIONS:\n" ++ pPrint (pretty smtfuncs)
   let vartypestcons = foldr union [] (map (tconsOfTypeExpr . snd) vartypes)
       funcstcons    = foldr union [] (map (tconsOfTypeExpr . funcType) fdecls)
@@ -124,7 +124,7 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
                           (map (typeParamsOfSort . type2sort)
                           (map snd vartypes ++ map TVar fdecltvars))
       varsorts = map (\(i,te) -> (i, type2sort te)) vartypes ++ extravars
-  --putStrLn $ "Assertion: " ++ pPrint (pretty assertion)
+  --printInfoLine $ "Assertion: " ++ pPrint (pretty assertion)
   let smt   = concatMap preludeType2SMT (map snd primtypes) ++
               [ EmptyLine ] ++
               (if null decls
@@ -144,7 +144,7 @@ checkUnsatWithSMT opts qf title pistore consinfos vartypes
               , Comment "check satisfiability:"
               , CheckSat
               ]
-  --putStrLn $ "SMT commands as Curry term:\n" ++ show smt
+  --printInfoLine $ "SMT commands as Curry term:\n" ++ show smt
   let preludesmt = if all ((`elem` defaultSMTTypes) . snd) primtypes
                      then "Prelude_min.smt"
                      else "Prelude.smt"
@@ -192,8 +192,9 @@ readIncludeFile incfile = do
       exlocalinclude <- doesFileExist localinclude
       if exlocalinclude
         then readFile localinclude
-        else do putStrLn $ "Warning: " ++ localinclude ++ " not found!\n" ++
-                           "SMT script might be incomplete!"
+        else do printInfoLine $
+                  "Warning: " ++ localinclude ++ " not found!\n" ++
+                  "SMT script might be incomplete!"
                 return ""
 
 -- Translate a typed variable into an SMT declaration:

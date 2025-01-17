@@ -17,7 +17,6 @@ import Data.IORef
 import Data.List
 import Data.Maybe                  ( isNothing )
 import System.Environment          ( getArgs )
-import System.IO                   ( hFlush, hPutStrLn, stderr, stdout )
 
 import Debug.Trace ( trace )
 
@@ -64,7 +63,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 04/01/25)"
+  bannerText = "Curry Non-Failure Verifier (Version of 17/01/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -78,8 +77,8 @@ main = do
   when (optDeleteCache opts0) $ deleteVerifyCacheDirectory opts0
   case progs of
     [] -> unless (optDeleteCache opts0) $ do
-            putStrLn "Module name missing!"
-            putStrLn "Try option '--help' for usage information."
+            printInfoLine "Module name missing!"
+            printInfoLine "Try option '--help' for usage information."
             exitWith 1
     ms -> do
       if optDomainID opts == analysisName resultValueAnalysisTop
@@ -106,7 +105,7 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   let z3msg = "Option '--nosmt' activated since SMT solver Z3 not found in PATH!"
   opts <- if z3exists || not (optSMT opts0)
             then return opts0
-            else do hPutStrLn stderr z3msg
+            else do printInfoLine z3msg
                     return opts0 { optSMT = False }
   printWhenStatus opts $ "Processing module '" ++ mname ++ "':"
   flatprog <- getFlatProgFor pistore mname
@@ -145,7 +144,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   imps@(impconsinfos,impacalltypes,impnftypes,impiotypes) <-
     if optImports opts
       then do
-        whenStatus opts $ putStr $ "Reading abstract types of imports: " ++
+        whenStatus opts $ printInfoString $ "Reading abstract types of imports: " ++
           unwords (progImports flatprog)
         -- use quiet mode for imports when showing only verification results:
         let impopts = if optVerb opts == 1 then opts { optVerb = 0 } else opts
@@ -153,7 +152,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
                            (verifyModuleIfNew valueanalysis pistore astore)
                            (progImports flatprog)
       else return ([],[],[],[])
-  if optTime opts then do whenStatus opts $ putStr "..."
+  if optTime opts then do whenStatus opts $ printInfoString "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
                   else printWhenStatus opts ""
   let modconsinfos = consInfoOfTypeDecls (progTypes flatprog)
@@ -198,7 +197,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
        printVerifyResult opts st mname isVisible
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
-       when (optTime opts && optVerb opts > 0) $ putStrLn $
+       when (optTime opts && optVerb opts > 0) $ printInfoLine $
          "TOTAL VERIFICATION TIME: " ++ show tdiff ++ " msec"
        return (numits, tdiff, st)
      else return (0, 0, vstate)
@@ -211,7 +210,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
                             (numpubacalltypes, numntacalltypes)
                             finalntacalltypes
                             (map fst (vstFunConds vst)) (vstStats vst)
-  when (optStats opts) $ putStr stattxt
+  when (optStats opts) $ printInfoString stattxt
   when withverify $ do
     storeTypes opts mname fdecls modconsinfos finalacalltypes
       (filter (isVisible .fst) finalntacalltypes) (vstFunConds vst) iotypes
@@ -248,10 +247,10 @@ inferCallTypes opts consinfos isVisible mname mtime flatprog
       ntcalltypes  = filter (not . isTotalCallType . snd) calltypes
       pubcalltypes = filter (isVisible . fst) ntcalltypes
   if optVerb opts > 2
-    then putStrLn $ unlines $ "CONCRETE CALL TYPES OF ALL OPERATIONS:" :
+    then printInfoLine $ unlines $ "CONCRETE CALL TYPES OF ALL OPERATIONS:" :
            showFunResults prettyFunCallTypes calltypes
     else when (optVerb opts > 2 || optCallTypes opts) $
-      putStrLn $ unlines $
+      printInfoLine $ unlines $
         ("NON-TRIVIAL CONCRETE CALL TYPES OF " ++
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
         showFunResults prettyFunCallTypes
@@ -265,10 +264,10 @@ inferCallTypes opts consinfos isVisible mname mtime flatprog
       ntacalltypes  = filter (not . isTotalACallType . snd) acalltypes
       pubacalltypes = filter (isVisible . fst) ntacalltypes
   if optVerb opts > 2
-    then putStrLn $ unlines $ "ABSTRACT CALL TYPES OF ALL OPERATIONS:" :
+    then printInfoLine $ unlines $ "ABSTRACT CALL TYPES OF ALL OPERATIONS:" :
            showFunResults prettyFunCallAType acalltypes
     else when (optVerb opts > 2 || optCallTypes opts) $
-      putStrLn $ unlines $
+      printInfoLine $ unlines $
         ("NON-TRIVIAL ABSTRACT CALL TYPES OF " ++
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
         showFunResults prettyFunCallAType
@@ -287,10 +286,10 @@ inferIOTypes opts valueanalysis astore isVisible flatprog = do
       ntiotypes    = filter (not . isAnyIOType . snd) iotypes
       pubntiotypes = filter (isVisible . fst) ntiotypes
   if optVerb opts > 2
-    then putStrLn $ unlines $ "INPUT/OUTPUT TYPES OF ALL OPERATIONS:" :
+    then printInfoLine $ unlines $ "INPUT/OUTPUT TYPES OF ALL OPERATIONS:" :
            showFunResults showIOT iotypes
-    else when (optVerb opts > 2 || optIOTypes opts) $
-      putStrLn $ unlines $
+    else when (optIOTypes opts) $
+      printInfoLine $ unlines $
         ("NON-TRIVIAL INPUT/OUTPUT TYPES OF " ++
          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
         showFunResults showIOT
@@ -304,15 +303,15 @@ showFunctionInfo opts mname vst = do
       qf = (mname, f)
   fdecls <- currentFuncDecls vst
   if qf `notElem` map funcName fdecls
-    then putStrLn $ "Function '" ++ snd qf ++ "' not defined!"
+    then printInfoLine $ "Function '" ++ snd qf ++ "' not defined!"
     else do
       let iot   = maybe (trivialInOutType 0) id (Map.lookup qf (vstIOTypes vst))
           ctype = maybe (Just [anyType]) id (Map.lookup qf (vstCallTypes vst))
-      putStrLn $ "Function '" ++ f ++ "':"
-      putStrLn $ "In/out type: " ++ showIOT iot
-      putStrLn $ "Call type  : " ++ prettyFunCallAType ctype
+      printInfoLine $ "Function '" ++ f ++ "':"
+      printInfoLine $ "In/out type: " ++ showIOT iot
+      printInfoLine $ "Call type  : " ++ prettyFunCallAType ctype
       maybe (return ())
-            (\nfc -> putStrLn $ showConditions fdecls [(qf,nfc)])
+            (\nfc -> printInfoLine $ showConditions fdecls [(qf,nfc)])
             (lookup qf (vstFunConds vst))
 
 -- Try to verify a module, possibly in several iterations.
@@ -368,7 +367,7 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
                    (union (map fst newfailures) (map fst newrefineconds)))
       printWhenStatus opts $ "Repeat verification with new call types..." ++
         "(" ++ show (length newfdecls) ++ " functions)"
-      --putStrLn $ unlines $
+      --printInfoLine $ unlines $
       --  showFunResults prettyFunCallAType (sortFunResults $ vstCallTypes st')
       tryVerifyProg opts (numits + 1) st' mname funusage newfdecls
  where
@@ -377,12 +376,12 @@ tryVerifyProg opts numits vstate mname funusage fdecls = do
 
   printFailures st = whenStatus opts $ do
     unless (null (vstFailedFuncs st)) $
-      putStrLn $ failComment ++ "FUNCTION CALLS:\n" ++
+      printInfoLine $ failComment ++ "FUNCTION CALLS:\n" ++
          unlines (map (\ (qf,_,e) -> "Function '" ++ snd qf ++
                                      "': call '" ++ showExp e ++ "'")
                       (reverse (vstFailedFuncs st)) ++ [failLine])
     unless (null (vstPartialBranches st)) $
-      putStrLn $ failComment ++ "FUNCTIONS:\n" ++
+      printInfoLine $ failComment ++ "FUNCTIONS:\n" ++
          unlines
            (map (\ (qf,_,e,cs) -> showIncompleteBranch qf e cs)
                 (reverse (vstPartialBranches st)) ++ [failLine])
@@ -870,7 +869,7 @@ getFuncType qf ar
   = return $ trivialInOutType ar
   | otherwise
   = do st <- get
-       maybe (do lift $ putStrLn $
+       maybe (do lift $ printInfoLine $
                    "WARNING: in/out type of '" ++ show qf ++ "' not found!"
                  return $ trivialInOutType ar)
              return
@@ -898,12 +897,12 @@ incrUnsatSMT = do
 getToolOptions :: TermDomain a => VerifyStateM a Options
 getToolOptions = get >>= return . vstToolOpts
 
---- Prints a string with `putStrLn` if the verbosity is at least as the given
---- one.
+--- Prints a string with `printInfoString` if the verbosity is at least as
+--- the given one.
 printIfVerb :: TermDomain a => Int -> String -> VerifyStateM a ()
 printIfVerb v s = do
   opts <- getToolOptions
-  when (optVerb opts >= v) $ lift $ putStrLn s
+  when (optVerb opts >= v) $ lift $ printInfoString s
 
 ------------------------------------------------------------------------------
 
@@ -973,16 +972,16 @@ showVarExpTypes = do
   opts <- getToolOptions
   when (optVerb opts > 3) $ do
     st <- get
-    lift $ putStr $
+    lift $ printInfoString $
       "Current set of variables in function " ++ snd qf ++
       ":\nVariable bindings:\n" ++
       unlines (map (\ (v,te,e) -> showBindExp v e ++
                      if te == unknownType then "" else " :: " ++ showTypeExp te)
                    (vstVarExp st))
     vartypes <- getVarTypes
-    lift $ putStr $ "Variable types\n" ++ showVarTypes vartypes
+    lift $ printInfoString $ "Variable types\n" ++ showVarTypes vartypes
     cond <- getExpandedCondition
-    lift $ putStrLn $ "Current condition: " ++ showSimpExp cond
+    lift $ printInfoLine $ "Current condition: " ++ showSimpExp cond
 
 -- Verify an expression (if the first argument is `True`) and,
 -- if the expression is not a variable, create a fresh
@@ -1008,7 +1007,7 @@ verifyVarExpr ve exp = case exp of
   Var v         -> if v == ve
                      then return []
                      else do
-                       --lift $ putStrLn $ "Expression with different vars: " ++
+                       --lift $ printInfoLine $ "Expression with different vars: " ++
                        --                  show (v,ve)
                        --showVarExpTypes
                        vtypes <- getVarTypeOf v
@@ -1411,8 +1410,8 @@ anyTypes n = take n (repeat anyType)
 enforceNormalForm :: Options -> String -> a -> IO ()
 enforceNormalForm opts s x
   | optEnforceNF opts
-  = do whenStatus opts $ putStr $ "EVALUATE " ++ s ++ " TO NORMAL FORM..."
-       hFlush stdout
+  = do whenStatus opts $
+         printInfoString $ "EVALUATE " ++ s ++ " TO NORMAL FORM..."
        (id $!! x) `seq` return ()
        printWhenStatus opts "DONE"
   | otherwise
@@ -1436,7 +1435,7 @@ isUnsatisfiable bexp = do
       let vtypes   = filter ((`elem` allvs) . fst) vts
           question = "Verifying function " ++ snd fname ++ ":\n\n" ++
                      "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE?"
-      unless (all (`elem` map fst vtypes) allvs) $ lift $ putStrLn $
+      unless (all (`elem` map fst vtypes) allvs) $ lift $ printInfoLine $
         "WARNING in operation '" ++ snd fname ++
         "': missing variables in unsatisfiability check!"
       consinfos <- getConsInfos
