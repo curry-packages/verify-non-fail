@@ -113,15 +113,6 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   if outdatedtypes || optRerun opts || not (null (optFunction opts))
     then verifyModule valueanalysis pistore astore opts mname flatprog
     else do
-      let avalue = startValue valueanalysis
-      when (optIOTypes opts) $ do
-        printWhenStatus opts "Reading in/out types from previous verification..."
-        iotypes <- readIOTypes opts mname
-        -- Hack: this unused expression is necessary to convince the type
-        -- checker that `iotypes` is parametric over the type variable `a`:
-        const (return ()) (valuesOfIOT (snd (head iotypes)) == avalue)
-        printIOTypes opts iotypes
-      printWhenStatus opts "Reading call types from previous verification..."
       let fdecls       = progFuncs flatprog
           visfuncs     = filter (\fn -> optGenerated opts || isCurryID fn)
                                 (map funcName
@@ -129,6 +120,15 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
                                              fdecls))
           visfuncset   = Set.fromList visfuncs
           isVisible qf = Set.member qf visfuncset
+      let avalue = startValue valueanalysis
+      when (optIOTypes opts) $ do
+        printWhenStatus opts "Reading in/out types from previous verification..."
+        iotypes <- readIOTypes opts mname
+        -- Hack: this unused expression is necessary to convince the type
+        -- checker that `iotypes` is parametric over the type variable `a`:
+        const (return ()) (valuesOfIOT (snd (head iotypes)) == avalue)
+        printIOTypes opts (filter (isVisible . fst) iotypes)
+      printWhenStatus opts "Reading call types from previous verification..."
       (ctypes,nfconds) <- readCallCondTypes opts mname
       -- Hack: this unused expression is necessary to convince the type
       -- checker that `ctype` is parametric over the type variable `a`:
