@@ -11,7 +11,8 @@
 -----------------------------------------------------------------------------
 
 module Verify.Files
-   ( deleteVerifyCacheDirectory, typeFilesOutdated, readCallCondTypes
+   ( deleteVerifyCacheDirectory, typeFilesOutdated
+   , readIOTypes, readCallCondTypes
    , readTypesOfModules, readPublicCallTypeModule
    , readCallTypeFile, readNonFailCondFile
    , storeTypes
@@ -197,6 +198,13 @@ readTypes opts mname = do
           map (\ (fn,ct)  -> ((mname,fn), ct)) cts,
           map (\ (fn,nfc) -> ((mname,fn), nfc)) nfcs,
           map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots)
+
+-- Reads the abstract call types and non-fail conditions
+-- for a given module.
+readIOTypes :: TermDomain a => Options -> String -> IO [(QName,InOutType a)]
+readIOTypes opts mname = do
+  iots <- getIOTypesFile opts mname >>= readTermFile opts
+  return $ map (\ (fn,iot) -> ((mname,fn), IOT iot)) iots
 
 -- Reads the abstract call types and non-fail conditions
 -- for a given module.

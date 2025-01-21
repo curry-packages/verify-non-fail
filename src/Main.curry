@@ -113,6 +113,14 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
   if outdatedtypes || optRerun opts || not (null (optFunction opts))
     then verifyModule valueanalysis pistore astore opts mname flatprog
     else do
+      let avalue = startValue valueanalysis
+      when (optIOTypes opts) $ do
+        printWhenStatus opts "Reading in/out types from previous verification..."
+        iotypes <- readIOTypes opts mname
+        -- Hack: this unused expression is necessary to convince the type
+        -- checker that `iotypes` is parametric over the type variable `a`:
+        const (return ()) (valuesOfIOT (snd (head iotypes)) == avalue)
+        printIOTypes opts iotypes
       printWhenStatus opts "Reading call types from previous verification..."
       let fdecls       = progFuncs flatprog
           visfuncs     = filter (\fn -> optGenerated opts || isCurryID fn)
@@ -122,11 +130,10 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
           visfuncset   = Set.fromList visfuncs
           isVisible qf = Set.member qf visfuncset
       (ctypes,nfconds) <- readCallCondTypes opts mname
-      const (printVerifyResults opts mname isVisible fdecls ctypes nfconds)
-            -- Hack: this unused expression is necessary to convince the type
-            -- checker that both expressions are parametric over the same
-            -- type variable `a`:
-            (snd (head ctypes) == Just [startValue valueanalysis])
+      -- Hack: this unused expression is necessary to convince the type
+      -- checker that `ctype` is parametric over the type variable `a`:
+      const (return ()) (snd (head ctypes) == Just [avalue])
+      printVerifyResults opts mname isVisible fdecls ctypes nfconds
       return ()
 
 --- Verify a single module.
@@ -144,7 +151,8 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   imps@(impconsinfos,impacalltypes,impnftypes,impiotypes) <-
     if optImports opts
       then do
-        whenStatus opts $ printInfoString $ "Reading abstract types of imports: " ++
+        whenStatus opts $ printInfoString $
+          "Reading abstract types of imports: " ++
           unwords (progImports flatprog)
         -- use quiet mode for imports when showing only verification results:
         let impopts = if optVerb opts == 1 then opts { optVerb = 0 } else opts
@@ -166,8 +174,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   (acalltypes, numntacalltypes, numpubacalltypes) <- id $!!  
     inferCallTypes opts consinfos isVisible mname mtime flatprog mboldacalltypes
   -- infer in/out types:
-  (iotypes, numntiotypes, numpubntiotypes) <- id $!!
-    inferIOTypes opts valueanalysis astore isVisible flatprog
+  iotypes <- id $!! inferIOTypes opts valueanalysis astore isVisible flatprog
   -- read previously inferred non-fail conditions:
   mbnfconds <- readNonFailCondFile opts mtime mname
 
@@ -204,9 +211,11 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   -- print statistics:
   let finalacalltypes   = Map.toList (vstCallTypes vst)
       finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
+      ntiotypes         = filter (not . isAnyIOType . snd) iotypes
+      numpubntiotypes   = length (filter (isVisible . fst) ntiotypes)
       (stattxt,statcsv) = showStatistics opts vtime vnumits isVisible
                             numvisfuncs numfdecls
-                            (numpubntiotypes, numntiotypes)
+                            (numpubntiotypes, length ntiotypes)
                             (numpubacalltypes, numntacalltypes)
                             finalntacalltypes
                             (map fst (vstFunConds vst)) (vstStats vst)
@@ -278,23 +287,53 @@ inferCallTypes opts consinfos isVisible mname mtime flatprog
 --- Infer the in/out types of all functions in a program and return them
 --- together with the number of all and public non-trivial in/out types.
 inferIOTypes :: TermDomain a => Options -> Analysis a -> IORef (AnalysisStore a)
-             -> (QName -> Bool) -> Prog
-             -> IO ([(QName, InOutType a)], Int, Int)
+             -> (QName -> Bool) -> Prog -> IO [(QName, InOutType a)]
 inferIOTypes opts valueanalysis astore isVisible flatprog = do
   rvmap <- loadAnalysisWithImports astore valueanalysis opts flatprog
-  let iotypes      = map (inOutATypeFunc rvmap) (progFuncs flatprog)
-      ntiotypes    = filter (not . isAnyIOType . snd) iotypes
-      pubntiotypes = filter (isVisible . fst) ntiotypes
-  if optVerb opts > 2
-    then printInfoLine $ unlines $ "INPUT/OUTPUT TYPES OF ALL OPERATIONS:" :
-           showFunResults showIOT iotypes
-    else when (optIOTypes opts) $
-      printInfoLine $ unlines $
-        ("NON-TRIVIAL INPUT/OUTPUT TYPES OF " ++
-         (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:") :
-        showFunResults showIOT
-          (sortFunResults (if optPublic opts then pubntiotypes else ntiotypes))
-  return (iotypes, length ntiotypes, length pubntiotypes)
+  let iotypes = map (inOutATypeFunc rvmap) (progFuncs flatprog)
+  printIOTypesIfDemanded opts isVisible iotypes
+  return iotypes
+
+--- Infer the in/out types of all functions in a program and return them
+--- together with the number of all and public non-trivial in/out types.
+printIOTypesIfDemanded :: TermDomain a => Options -> (QName -> Bool)
+                       -> [(QName, InOutType a)] -> IO ()
+printIOTypesIfDemanded opts isvisible iotypes
+  | optVerb opts > 2
+  = do printInfoLine "INPUT/OUTPUT TYPES OF ALL OPERATIONS:"
+       printIOTypes opts iotypes
+  | not (optIOTypes opts)
+  = return ()
+  | optFormat opts /= FormatText
+  = do printWhenStatus opts "INPUT/OUTPUT TYPES OF ALL PUBLIC OPERATIONS:"
+       printIOTypes opts 
+         (filter (\(qf,_) -> not (optPublic opts) || isvisible qf) iotypes)
+  | otherwise
+  = do let ntiotypes    = filter (not . isAnyIOType . snd) iotypes
+           pubntiotypes = filter (isvisible . fst) ntiotypes
+       printInfoLine $ "NON-TRIVIAL INPUT/OUTPUT TYPES OF " ++
+          (if optPublic opts then "PUBLIC" else "ALL") ++ " OPERATIONS:"
+       printIOTypes opts (if optPublic opts then pubntiotypes else ntiotypes)
+
+printIOTypes :: TermDomain a => Options -> [(QName, InOutType a)] -> IO ()
+printIOTypes opts iotypes
+  | optFormat opts == FormatJSON
+  = putStrLn $ ppJSON $ JArray $ map ioType2JSON (sortFunResults iotypes)
+  | optFormat opts == FormatXML
+  = putStrLn $ showXmlDoc $ xml "results" $
+      map ioType2XML (sortFunResults iotypes)
+  | otherwise
+  = printInfoLine $ unlines $ showFunResults showIOT (sortFunResults iotypes)
+ where
+  ioType2JSON ((mn,fn),fct) =
+    JObject [("module", JString mn),
+             ("name"  , JString fn),
+             ("result", JString (show fct))]
+             
+  ioType2XML ((mn,fn),fct) =
+    xml "operation" [xml "module" [xtxt mn],
+                     xml "name"   [xtxt fn],
+                     xml "result" [xtxt (show fct)]]
 
 -- Shows the call and in/out type of a given function defined in the module.
 showFunctionInfo :: TermDomain a => Options -> String -> VerifyState a -> IO ()

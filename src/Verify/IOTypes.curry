@@ -3,11 +3,12 @@
 --- and manipulate such types.
 ---
 --- @author Michael Hanus
---- @version December 2023
+--- @version January 2025
 ------------------------------------------------------------------------------
 
 module Verify.IOTypes
-  ( InOutType(..), trivialInOutType, isAnyIOType, showIOT, inOutATypeFunc
+  ( InOutType(..), trivialInOutType, isAnyIOType, showIOT, valuesOfIOT
+  , inOutATypeFunc
   , VarTypes, VarTypesMap, ioVarType, showVarTypes, showArgumentVars
   , addVarType2Map, concVarTypesMap, setVarTypeInMap
   , bindVarInIOTypes, simplifyVarTypes
@@ -31,11 +32,11 @@ import Verify.Helpers
 -- Nevertheless, the output types should be inferred by a standard
 -- fixpoint analysis and the analysis results can be used here.
 
---- An InOutType is a disjunction, represented as a list,
+--- An `InOutType` is a disjunction, represented as a list,
 --- of input/output type pairs.
 --- It is parameterized over the abstract term domain.
 data InOutType a = IOT [([a],a)]
-  deriving Eq
+  deriving (Eq, Show)
 
 --- The trivial `InOutType` for a function of a given arity.
 trivialInOutType :: TermDomain a => Int -> InOutType a
@@ -47,6 +48,7 @@ isAnyIOType (IOT iots) = case iots of
   [(ioargs,iores)] -> all (== anyType) (iores : ioargs)
   _                -> False
 
+--- Shows an `InOutType` in prettier syntax.
 showIOT :: TermDomain a => InOutType a -> String
 showIOT (IOT iots) = "{" ++ intercalate " || " (map showIOType iots) ++ "}"
  where
