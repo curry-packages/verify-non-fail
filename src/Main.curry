@@ -63,7 +63,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 20/01/25)"
+  bannerText = "Curry Non-Failure Verifier (Version of 21/01/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -140,14 +140,16 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
 verifyModule :: TermDomain a => Analysis a -> IORef ProgInfo
              -> IORef (AnalysisStore a) -> Options -> String -> Prog -> IO ()
 verifyModule valueanalysis pistore astore opts mname flatprog = do
-  let orgfdecls    = progFuncs flatprog
-      numfdecls    = length orgfdecls
-      visfuncs     = filter (\fn -> optGenerated opts || isCurryID fn)
-                            (map funcName (filter ((== Public) . funcVisibility)
-                                          orgfdecls))
-      numvisfuncs  = length visfuncs
-      visfuncset   = Set.fromList visfuncs
-      isVisible qf = Set.member qf visfuncset
+  let orgfdecls     = progFuncs flatprog
+      numfdecls     = length orgfdecls
+      visfuncs      = map funcName (filter ((== Public) . funcVisibility)
+                                          orgfdecls)
+      visfuncset    = Set.fromList visfuncs
+      isVisible qf  = Set.member qf visfuncset
+      showfuncset   = Set.fromList
+                        (filter (\fn -> optGenerated opts || isCurryID fn)
+                                visfuncs)
+      isShowable qf = Set.member qf showfuncset
   imps@(impconsinfos,impacalltypes,impnftypes,impiotypes) <-
     if optImports opts
       then do
@@ -174,7 +176,8 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   (acalltypes, numntacalltypes, numpubacalltypes) <- id $!!  
     inferCallTypes opts consinfos isVisible mname mtime flatprog mboldacalltypes
   -- infer in/out types:
-  iotypes <- id $!! inferIOTypes opts valueanalysis astore isVisible flatprog
+  iotypes <- id $!! inferIOTypes opts valueanalysis astore flatprog
+  printIOTypesIfDemanded opts isShowable iotypes
   -- read previously inferred non-fail conditions:
   mbnfconds <- readNonFailCondFile opts mtime mname
 
@@ -201,7 +204,7 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
        pi1 <- getProcessInfos
        (numits,st) <- tryVerifyProg opts 0 vstate mname funusage fdecls
        pi2 <- getProcessInfos
-       printVerifyResult opts st mname isVisible
+       printVerifyResult opts st mname isShowable
        let tdiff = maybe 0 id (lookup ElapsedTime pi2) -
                    maybe 0 id (lookup ElapsedTime pi1)
        when (optTime opts && optVerb opts > 0) $ printInfoLine $
@@ -212,8 +215,9 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   let finalacalltypes   = Map.toList (vstCallTypes vst)
       finalntacalltypes = filter (not . isTotalACallType . snd) finalacalltypes
       ntiotypes         = filter (not . isAnyIOType . snd) iotypes
-      numpubntiotypes   = length (filter (isVisible . fst) ntiotypes)
-      (stattxt,statcsv) = showStatistics opts vtime vnumits isVisible
+      numpubntiotypes   = length (filter (isShowable . fst) ntiotypes)
+      numvisfuncs       = length visfuncs
+      (stattxt,statcsv) = showStatistics opts vtime vnumits isShowable
                             numvisfuncs numfdecls
                             (numpubntiotypes, length ntiotypes)
                             (numpubacalltypes, numntacalltypes)
@@ -222,7 +226,8 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   when (optStats opts) $ printInfoString stattxt
   when withverify $ do
     storeTypes opts mname fdecls modconsinfos finalacalltypes
-      (filter (isVisible .fst) finalntacalltypes) (vstFunConds vst) iotypes
+      (filter (isVisible .fst) finalntacalltypes) (vstFunConds vst)
+      (filter (isVisible . fst) iotypes)
     storeStatistics opts mname stattxt statcsv
     when (optStoreFuncs opts) $ do
       let nfname = mname ++ ".NONFAIL"
@@ -287,12 +292,10 @@ inferCallTypes opts consinfos isVisible mname mtime flatprog
 --- Infer the in/out types of all functions in a program and return them
 --- together with the number of all and public non-trivial in/out types.
 inferIOTypes :: TermDomain a => Options -> Analysis a -> IORef (AnalysisStore a)
-             -> (QName -> Bool) -> Prog -> IO [(QName, InOutType a)]
-inferIOTypes opts valueanalysis astore isVisible flatprog = do
+             -> Prog -> IO [(QName, InOutType a)]
+inferIOTypes opts valueanalysis astore flatprog = do
   rvmap <- loadAnalysisWithImports astore valueanalysis opts flatprog
-  let iotypes = map (inOutATypeFunc rvmap) (progFuncs flatprog)
-  printIOTypesIfDemanded opts isVisible iotypes
-  return iotypes
+  return $ map (inOutATypeFunc rvmap) (progFuncs flatprog)
 
 --- Infer the in/out types of all functions in a program and return them
 --- together with the number of all and public non-trivial in/out types.
