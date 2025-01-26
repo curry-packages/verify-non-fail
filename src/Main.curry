@@ -63,7 +63,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 21/01/25)"
+  bannerText = "Curry Non-Failure Verifier (Version of 26/01/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -153,14 +153,17 @@ verifyModule valueanalysis pistore astore opts mname flatprog = do
   imps@(impconsinfos,impacalltypes,impnftypes,impiotypes) <-
     if optImports opts
       then do
+        let imports = progImports flatprog
         whenStatus opts $ printInfoString $
-          "Reading abstract types of imports: " ++
-          unwords (progImports flatprog)
-        -- use quiet mode for imports when showing only verification results:
-        let impopts = if optVerb opts == 1 then opts { optVerb = 0 } else opts
+          "Reading abstract types of imports: " ++ unwords imports
+        -- if only verification results should be shown, use quiet mode and
+        -- do not show in/out types for imports:
+        let impopts = if optVerb opts <= 1
+                        then opts { optVerb = 0, optIOTypes = False }
+                        else opts
         readTypesOfModules impopts
                            (verifyModuleIfNew valueanalysis pistore astore)
-                           (progImports flatprog)
+                           imports
       else return ([],[],[],[])
   if optTime opts then do whenStatus opts $ printInfoString "..."
                           (id $## imps) `seq` printWhenStatus opts "done"
