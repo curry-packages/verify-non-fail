@@ -10,7 +10,9 @@ import Data.List
 
 import Analysis.ProgInfo
 import Analysis.Types
-import CASS.Server        ( analyzeGeneric, analyzePublic )
+import CASS.Configuration ( CConfig(..), defaultCConfig )
+import CASS.Options       ( Options(..), defaultOptions )
+import CASS.Server        ( analyzeGenericWithOptions )
 import Data.Time          ( ClockTime )
 import FlatCurry.Goodies
 import FlatCurry.Files    ( flatCurryFileName )
@@ -28,19 +30,25 @@ import Verify.Options     ( Options, printWhenStatus )
 data AnalysisStore a = AnaStore [(String, ProgInfo a)]
 
 -- Loads CASS analysis results for a module and its imported entities.
-loadAnalysisWithImports :: (Read a, Show a, ReadWrite a) =>
-   IORef (AnalysisStore a) -> Analysis a -> Options -> Prog -> IO (QName -> a)
+loadAnalysisWithImports :: (Eq a, Read a, Show a, ReadWrite a)
+   => IORef (AnalysisStore a) -> Analysis a -> Verify.Options.Options -> Prog
+   -> IO (QName -> a)
 loadAnalysisWithImports anastore analysis opts prog = do
   maininfo <- getOrAnalyze (progName prog)
   impinfos <- mapM getOrAnalyze (progImports prog)
   return $ progInfo2Map $
     foldr combineProgInfo maininfo (map publicProgInfo impinfos)
  where
+  ananame = analysisName analysis
+
   getOrAnalyze mname = do
     AnaStore minfos <- readIORef anastore
-    maybe (do printWhenStatus opts $ "Getting " ++ analysisName analysis ++
-                " for '" ++ mname ++ "' via CASS..."
-              minfo <- fmap (either id error) $ analyzeGeneric analysis mname
+    maybe (do printWhenStatus opts $ "Getting " ++ ananame ++ " for '" ++
+                                     mname ++ "' via CASS..."
+              let cassopts = defaultCConfig
+                               { ccOptions = defaultOptions { optAll = True }}
+              minfo <- fmap (either id error) $
+                         analyzeGenericWithOptions cassopts analysis mname
               writeIORef anastore (AnaStore ((mname,minfo) : minfos))
               return minfo)
           return
@@ -50,7 +58,8 @@ loadAnalysisWithImports anastore analysis opts prog = do
   -- names to analysis information.
   progInfo2Map :: ProgInfo a -> (QName -> a)
   progInfo2Map proginfo qf =
-    maybe (error $ "Analysis information of '" ++ snd qf ++ "'' not found!")
+    maybe (error $ ananame ++ "analysis information of '" ++ snd qf ++
+                   "' not found!")
           id
           (lookupProgInfo qf proginfo)
 
