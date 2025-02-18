@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version January 2025
+--- @version February 2025
 -------------------------------------------------------------------------
 
 module Main where
@@ -63,7 +63,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 27/01/25)"
+  bannerText = "Curry Non-Failure Verifier (Version of 18/02/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -120,20 +120,22 @@ verifyModuleIfNew valueanalysis pistore astore opts0 mname = do
                                              fdecls))
           visfuncset   = Set.fromList visfuncs
           isVisible qf = Set.member qf visfuncset
-      let avalue = startValue valueanalysis
+      let qname  = ("","")                  -- some (unused) QName
+          avalue = startValue valueanalysis -- some (unused) abstract type value
       when (optIOTypes opts) $ do
         printWhenStatus opts "Reading in/out types from previous verification..."
         iotypes <- readIOTypes opts mname
-        -- Hack: this unused expression is necessary to convince the type
+        -- note: the `asTypeOf` expression is necessary to convince the type
         -- checker that `iotypes` is parametric over the type variable `a`:
-        const (return ()) (valuesOfIOT (snd (head iotypes)) == avalue)
-        printIOTypes opts (filter (isVisible . fst) iotypes)
+        printIOTypes opts
+          (filter (isVisible . fst)
+                  (iotypes `asTypeOf` [(qname, valueInOutType avalue)]))
       printWhenStatus opts "Reading call types from previous verification..."
       (ctypes,nfconds) <- readCallCondTypes opts mname
-      -- Hack: this unused expression is necessary to convince the type
+      -- note: the `asTypeOf` expression is necessary to convince the type
       -- checker that `ctype` is parametric over the type variable `a`:
-      const (return ()) (snd (head ctypes) == Just [avalue])
-      printVerifyResults opts mname isVisible fdecls ctypes nfconds
+      printVerifyResults opts mname isVisible fdecls
+        (ctypes `asTypeOf` [(qname, Just [avalue])]) nfconds
       return ()
 
 --- Verify a single module.
@@ -1052,8 +1054,8 @@ verifyVarExpr ve exp = case exp of
   Var v         -> if v == ve
                      then return []
                      else do
-                       --lift $ printInfoLine $ "Expression with different vars: " ++
-                       --                  show (v,ve)
+                       --lift $ printInfoLine $
+                       --  "Expression with different vars: " ++ show (v,ve)
                        --showVarExpTypes
                        vtypes <- getVarTypeOf v
                        -- TODO: improve by handling equality constraint v==ve
@@ -1337,7 +1339,8 @@ getBranchState = do
   return (ves,vts,cond)
 
 -- Gets the state information which might be changed during branch verification.
-restoreBranchState :: TermDomain a => ([(Int,TypeExpr,Expr)], VarTypesMap a, Expr -> Expr) -> VerifyStateM a ()
+restoreBranchState :: TermDomain a =>
+  ([(Int,TypeExpr,Expr)], VarTypesMap a, Expr -> Expr) -> VerifyStateM a ()
 restoreBranchState (ves,vts,cond) = do
   setVarExps ves
   setVarTypes vts
@@ -1345,7 +1348,8 @@ restoreBranchState (ves,vts,cond) = do
 
 -- Verify a branch where the first argument is the case argument variable
 -- and the second argument is the variable identifying the case expression.
-verifyBranch :: TermDomain a => Int -> Int -> BranchExpr -> VerifyStateM a (VarTypesMap a)
+verifyBranch :: TermDomain a => Int -> Int -> BranchExpr
+             -> VerifyStateM a (VarTypesMap a)
 verifyBranch casevar ve (Branch (LPattern l) e) = do
   bstate <- getBranchState
   vts  <- getVarTypes

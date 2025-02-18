@@ -91,6 +91,14 @@ reads a line until it is an integer):
       if n<0 then putStrLn "Negative number, try again" >> printFac
              else print (fac n)
 
+The ideas of the verification of arithmetic non-fail conditions
+are described in:
+
+> M. Hanus: Hybrid Verification of Declarative Programs with
+> Arithmetic Non-fail Conditions,
+> Proc. of the 22nd Asian Symposium on Programming Languages and Systems
+> (APLAS 2024), Springer LNCS 15194, pp. 109-129, 2024,
+> DOI: [10.1007/978-981-97-8943-6\_6](http://dx.doi.org/10.1007/978-981-97-8943-6\_6),
 
 ------------------------------------------------------------------------------
 

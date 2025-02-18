@@ -3,12 +3,12 @@
 --- and manipulate such types.
 ---
 --- @author Michael Hanus
---- @version January 2025
+--- @version February 2025
 ------------------------------------------------------------------------------
 
 module Verify.IOTypes
-  ( InOutType(..), trivialInOutType, isAnyIOType, showIOT, valuesOfIOT
-  , inOutATypeFunc
+  ( InOutType(..), valueInOutType, trivialInOutType, isAnyIOType, showIOT
+  , valuesOfIOT, inOutATypeFunc
   , VarTypes, VarTypesMap, ioVarType, showVarTypes, showArgumentVars
   , addVarType2Map, concVarTypesMap, setVarTypeInMap
   , bindVarInIOTypes, simplifyVarTypes
@@ -26,7 +26,7 @@ import Debug.Trace ( trace )
 import Verify.Helpers
 
 ------------------------------------------------------------------------------
--- The implementation of an anlysis to get the input/output types of operations.
+-- The implementation of an analysis to get the input/output types of operations.
 -- The input/output type is a disjunction of input/output type pairs.
 -- This is useful to infer call-types as well as output types of operations.
 -- Nevertheless, the output types should be inferred by a standard
@@ -37,6 +37,10 @@ import Verify.Helpers
 --- It is parameterized over the abstract term domain.
 data InOutType a = IOT [([a],a)]
   deriving (Eq, Show)
+
+--- The `InOutType` of a value or constant having a given abstract type.
+valueInOutType :: TermDomain a => a -> InOutType a
+valueInOutType atype = IOT [([], atype)]
 
 --- The trivial `InOutType` for a function of a given arity.
 trivialInOutType :: TermDomain a => Int -> InOutType a
@@ -225,7 +229,7 @@ type VarTypesMap a = [(Int, VarTypes a)]
 
 --- An abstract type represented as an input/output type for a variable.
 ioVarType :: TermDomain a => a -> VarTypes a
-ioVarType atype = [(IOT [([], atype)], [])]
+ioVarType atype = [(valueInOutType atype, [])]
 
 --- Shows a list of input/output variables types.
 showVarTypes :: TermDomain a => VarTypesMap a  -> String
