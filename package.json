@@ -36,7 +36,8 @@
     "executable": {
         "name"   : "curry-calltypes",
         "main"   : "Main",
-        "options": { "kics2" : ":set rts -T" }
+        "options": { "kics2" : ":set rts -T",
+                     "kmcc"  : ":set rts -T"  }
     },
     "source": {
         "git": "https://github.com/curry-packages/verify-non-fail.git",
