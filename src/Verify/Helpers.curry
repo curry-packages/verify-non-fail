@@ -10,7 +10,7 @@ import Data.List
 
 import Analysis.ProgInfo
 import Analysis.Types
-import CASS.Configuration ( CConfig(..), defaultCConfig )
+import CASS.Configuration ( CConfig(..), getDefaultCConfig )
 import CASS.Options       ( Options(..), defaultOptions )
 import CASS.Server        ( analyzeGenericWithOptions )
 import Data.Time          ( ClockTime )
@@ -45,8 +45,8 @@ loadAnalysisWithImports anastore analysis opts prog = do
     AnaStore minfos <- readIORef anastore
     maybe (do printWhenStatus opts $ "Getting " ++ ananame ++ " for '" ++
                                      mname ++ "' via CASS..."
-              let cassopts = defaultCConfig
-                               { ccOptions = defaultOptions { optAll = True }}
+              dcc <- getDefaultCConfig
+              let cassopts = dcc { ccOptions = defaultOptions { optAll = True }}
               minfo <- fmap (either id error) $
                          analyzeGenericWithOptions cassopts analysis mname
               writeIORef anastore (AnaStore ((mname,minfo) : minfos))
