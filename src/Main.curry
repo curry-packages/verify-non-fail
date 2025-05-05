@@ -5,10 +5,10 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version February 2025
+--- @version May 2025
 -------------------------------------------------------------------------
 
-module Main where
+module Main ( main ) where
 
 import Control.Monad               ( unless, when )
 import Curry.Compiler.Distribution ( curryCompiler )
@@ -63,7 +63,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 01/05/25)"
+  bannerText = "Curry Non-Failure Verifier (Version of 05/05/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
