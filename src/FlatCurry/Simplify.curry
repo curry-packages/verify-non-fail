@@ -3,7 +3,7 @@
 --- In particular, it replaces calls to Eq.== implementations by Prelude.==
 ---
 --- @author  Michael Hanus
---- @version September 2024
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module FlatCurry.Simplify
@@ -39,7 +39,7 @@ simpExpr exp = case exp of
   Var  _          -> exp
   Lit  _          -> exp
   Comb ct qf args -> simpComb ct qf (map simpExpr args)
-  Let  bs e       -> Let (map (\ (v,b) -> (v, simpExpr b)) bs) (simpExpr e)
+  Let  bs e       -> Let (map (\ (v,t,b) -> (v, t, simpExpr b)) bs) (simpExpr e)
   Or   e1 e2      -> Or (simpExpr e1) (simpExpr e2)
   Case ct e brs   -> if isOtherwise e
                        then simpExpr (trueBranch brs)

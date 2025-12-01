@@ -2,7 +2,7 @@
 --- Definition and some operations for non-fail conditions.
 ---
 --- @author  Michael Hanus
---- @version March 2024
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module Verify.NonFailConditions
@@ -19,6 +19,7 @@ import FlatCurry.Types
 import FlatCurry.Build
 import FlatCurry.Print
 import FlatCurry.Simplify
+import Verify.Helpers    ( unknownType )
 import Verify.ProgInfo
 
 --- Non-fail conditions are represented as a pair of typed variables
@@ -63,8 +64,8 @@ renameAllVars rnm = rnmE
     Lit _         -> exp
     Comb ct qf es -> Comb ct qf (map rnmE es)
     Or e1 e2      -> Or (rnmE e1) (rnmE e2)
-    Free vs e     -> Free (map rnmV vs) (rnmE e)
-    Let vbs e     -> Let (map (\(v,ve) -> (rnmV v, rnmE ve)) vbs) (rnmE e)
+    Free vs e     -> Free (map (\(v,vt) -> (rnmV v, vt)) vs) (rnmE e)
+    Let vbs e     -> Let (map (\(v,vt,ve) -> (rnmV v,vt,rnmE ve)) vbs) (rnmE e)
     Case ct e brs -> Case ct (rnmE e)
                           (map (\(Branch p pe) -> Branch (rnmP p) (rnmE pe)) brs)
     Typed e t     -> Typed (rnmE e) t
@@ -156,7 +157,9 @@ genNonFailFunction fdecls (qfc,(_,cnd)) =
           (nftype [1..ar] texp)
           (Rule [1..ar] (if all (`elem` [1..ar]) nfcondvars
                            then nfcondexp
-                           else Free (nfcondvars \\ [1..ar]) nfcondexp)))
+                           else Free (map (\v -> (v,unknownType))
+                                          (nfcondvars \\ [1..ar]))
+                                     nfcondexp)))
    where
     nftype []     _     = TCons (pre "Bool") []
     nftype (v:vs) ftype = case ftype of
@@ -165,7 +168,7 @@ genNonFailFunction fdecls (qfc,(_,cnd)) =
       _              -> error "Illegal function type in genNonFailFunction"
 
   nfcondexp = updCombs transClassImplOp (simpExpr cnd)
-  nfcondvars = nub (allFreeVars nfcondexp)
+  nfcondvars = nub (allUnboundVars nfcondexp)
 
   -- transform possible implementation of a class operation, e.g.,
   -- `_impl#minBound#Prelude.Bounded#Prelude.Char#` -> `minBound :: Char`
@@ -198,14 +201,15 @@ transTester consinfos qc exp
  where
   (arity,_,siblings) = infoOfCons consinfos qc
 
---- Gets all free variables (i.e., without let/free/pattern bound variables)
+--- Gets all unbound variables (i.e., without let/free/pattern bound variables)
 --- occurring in an expression.
-allFreeVars :: Expr -> [Int]
-allFreeVars e = trExpr (:) (const id) comb lt fr (.) cas branch const e []
+allUnboundVars :: Expr -> [Int]
+allUnboundVars e = trExpr (:) (const id) comb lt fr (.) cas branch const e []
  where
   comb _ _ = foldr (.) id
-  lt bs exp = (filter (`notElem` (map fst bs))) . exp . foldr (.) id (map snd bs)
-  fr vs exp = (filter (`notElem` vs)) . exp
+  lt bs exp = (filter (`notElem` (map (\(v,_,_) -> v) bs)))
+              . exp . foldr (.) id (map (\(_,_,z) -> z) bs)
+  fr vs exp = (filter (`notElem` map fst vs)) . exp
   cas _ exp bs = exp . foldr (.) id bs
   branch pat exp = (filter (`notElem` (args pat))) . exp
   args pat | isConsPattern pat = patArgs pat

@@ -5,7 +5,7 @@
 --- avoid multiple loading of FlatCurry programs.
 ---
 --- @author  Michael Hanus
---- @version March 2024
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module Verify.ProgInfo
@@ -15,7 +15,7 @@ import Data.IORef
 import Data.List          ( (\\), find )
 
 import qualified Data.Map as Map
-import FlatCurry.Build    ( fcFailed, pre )
+import FlatCurry.Build    ( fcFailed )
 import FlatCurry.FilesRW  ( readFlatCurry )
 import FlatCurry.Goodies
 import FlatCurry.Names    ( anonCons )

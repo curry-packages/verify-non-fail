@@ -3,7 +3,7 @@
 --- which adds `Typed` expressions to variables/function/constructor calls.
 ---
 --- @author  Michael Hanus
---- @version January 2025
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module FlatCurry.AddTypes
@@ -243,11 +243,13 @@ addTypes2Expr = addTypes
                                                      (zip targs ats))) te
                             else typedExp optAddCombType (Comb ct qf targs) te
     Let  bs e       -> do bts <- mapM (\_ -> newFreshTVar >>= return . TVar) bs
-                          addVarTypes (zip (map fst bs) bts)
+                          addVarTypes (zip (varsOfLetBind bs) bts)
                           trbexps <- mapM (uncurry addTypes)
-                                          (zip bts (map snd bs))
+                                          (zip bts (expsOfLetBind bs))
                           tre <- addTypes te e
-                          return $ Let (zip (map fst bs) trbexps) tre
+                          return $ Let (map (\ ((v,t,_),be) -> (v,t,be))
+                                            (zip bs trbexps))
+                                       tre
     Or   e1 e2      -> do tre1 <- addTypes te e1
                           tre2 <- addTypes te e2
                           return $ Or tre1 tre2
@@ -258,7 +260,7 @@ addTypes2Expr = addTypes
     Typed e tte     -> do trexp <- addTypes tte e
                           unifyTypes tte te
                           return $ Typed trexp tte
-    Free vs e       -> do vts <- mapM (\v -> newFreshTVar >>=
+    Free vs e       -> do vts <- mapM (\(v,_) -> newFreshTVar >>=
                                        \tv -> return (v, TVar tv)) vs
                           addVarTypes vts
                           trexp <- addTypes te e
@@ -377,17 +379,18 @@ allTVarsInTExp te = trTypeExpr (:) tcomb (.) forall te []
 
 -- Get all type variables occurring in an expression.
 allTVarsInExp :: Expr -> [Int]
-allTVarsInExp e = trExpr (const id) (const id) comb lt fr (.) cas branch fre e []
+allTVarsInExp e =
+  trExpr (const id) (const id) comb lt fr (.) cas branch fre e []
  where
   comb _ _ = foldr (.) id
-  lt bs exp = exp . foldr (.) id (map snd bs)
+  lt bs exp = exp . foldr (.) id (map (\ (_,_,z) -> z) bs)
   fr _ exp = exp
   cas _ exp bs = exp . foldr (.) id bs
   branch _ exp = exp
   fre exp te = (allTVarsInTExp te ++) . exp
 
 allTVarsInTDecl :: TypeDecl -> [Int]
-allTVarsInTDecl (Type _ _ tvars _) = map fst tvars
+allTVarsInTDecl (Type _ _ tvars _)    = map fst tvars
 allTVarsInTDecl (TypeSyn _ _ tvars _) = map fst tvars
 allTVarsInTDecl (TypeNew _ _ tvars _) = map fst tvars
 

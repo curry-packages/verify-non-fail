@@ -2,7 +2,7 @@
 --- The definition of call types and an operation to infer them.
 ---
 --- @author Michael Hanus
---- @version January 2024
+--- @version November 2025
 ------------------------------------------------------------------------------
 
 module Verify.CallTypes where
@@ -13,7 +13,6 @@ import Analysis.TermDomain ( TermDomain(..), litAsCons )
 import FlatCurry.Goodies
 import FlatCurry.Types
 
-import FlatCurry.Build     ( pre )
 import Verify.Helpers
 import Verify.Options
 import Verify.ProgInfo
@@ -241,8 +240,8 @@ callTypeExpr ctst exp = case exp of
   Var _         -> [ctstCallType ctst]
   Lit _         -> [ctstCallType ctst]
   Comb _ _ _    -> [ctstCallType ctst]
-  Let bs e      -> callTypeExpr (addFreshVars (map fst bs) ctst) e
-  Free vs e     -> callTypeExpr (addFreshVars vs ctst) e
+  Let bs e      -> callTypeExpr (addFreshVars (varsOfLetBind bs) ctst) e
+  Free vs e     -> callTypeExpr (addFreshVars (map fst vs) ctst) e
   Or e1 e2      -> unionCTs (callTypeExpr ctst e1) (callTypeExpr ctst e2)
   Case _ ce bs  ->
     case ce of

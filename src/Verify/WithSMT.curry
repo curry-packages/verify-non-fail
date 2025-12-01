@@ -2,7 +2,7 @@
 --- Some operations to translate FlatCurry operations into SMT assertions.
 ---
 --- @author  Michael Hanus
---- @version January 2025
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module Verify.WithSMT
@@ -221,7 +221,7 @@ allQNamesInExp e =
          classifyName (FuncPartCall _) = Right
          classifyName ConsCall         = Left
          classifyName (ConsPartCall _) = Left
-  lt bs exp = exp . foldr (.) id (map snd bs)
+  lt bs exp = exp . foldr (.) id (map (\(_,_,be) -> be) bs)
   fr _ exp = exp
   cas _ exp bs = exp . foldr (.) id bs
   branch pat exp = ((args pat)++) . exp
@@ -322,7 +322,7 @@ ndExpr :: Expr -> Bool
 ndExpr = trExpr (\_ -> False)
                 (\_ -> False)
                 (\_ _ nds -> or nds)
-                (\bs nd -> nd || any snd bs)
+                (\bs nd -> nd || any (\(_,_,be) -> be) bs)
                 (\_ _ -> True)
                 (\_ _ -> True)
                 (\_ nd bs -> nd || or bs)
@@ -369,8 +369,8 @@ exp2SMT lhs exp = case exp of
   Case _ e bs -> do t <- exp2SMT Nothing e
                     bts <- mapM branch2SMT bs
                     return $ makeRHS (Match t bts)
-  FC.Let bs e -> do tbs <- mapM (\(v,be) -> do t <- exp2SMT Nothing be
-                                               return (v,t))
+  FC.Let bs e -> do tbs <- mapM (\ (v,_,be) -> do t <- exp2SMT Nothing be
+                                                  return (v,t))
                                 bs
                     t <- exp2SMT lhs e
                     return $ tLet tbs t

@@ -5,7 +5,7 @@
 --- the call types are satisfied when invoking a function.
 ---
 --- @author Michael Hanus
---- @version May 2025
+--- @version November 2025
 -------------------------------------------------------------------------
 
 module Main ( main ) where
@@ -63,7 +63,7 @@ import Verify.WithSMT
 banner :: String
 banner = unlines [bannerLine, bannerText, bannerLine]
  where
-  bannerText = "Curry Non-Failure Verifier (Version of 05/05/25)"
+  bannerText = "Curry Non-Failure Verifier (Version of 26/11/25)"
   bannerLine = take (length bannerText) (repeat '=')
 
 main :: IO ()
@@ -1084,16 +1084,16 @@ verifyVarExpr ve exp = case exp of
                      -- note: also partial calls are considered as constructors
                      returnConsIOType qf vs ve
       _        -> returnConsIOType qf vs ve
-  Let bs e      -> do addVarExps (map (\(v,be) -> (v, unknownType, be)) bs)
-                      mapM_ (addVarAnyType . fst) bs
-                      iotss <- mapM (\ (v,be) -> verifyVarExpr v be) bs
+  Let bs e      -> do addVarExps (map (\(v,tv,be) -> (v, tv, be)) bs)
+                      mapM_ (addVarAnyType . varOfLetBind) bs
+                      iotss <- mapM (\ (v,_,be) -> verifyVarExpr v be) bs
                       -- remove initially set anyType's for the bound vars:
-                      mapM_ (removeVarAnyType . fst) bs
+                      mapM_ (removeVarAnyType . varOfLetBind) bs
                       addVarTypes (concat iotss)
-                      mapM_ (addAnyTypeIfUnknown . fst) bs
+                      mapM_ (addAnyTypeIfUnknown . varOfLetBind) bs
                       verifyVarExpr ve e
-  Free vs e     -> do addVarExps (map (\v -> (v, unknownType, Var v)) vs)
-                      mapM_ addVarAnyType vs
+  Free vs e     -> do addVarExps (map (\(v,tv) -> (v, tv, Var v)) vs)
+                      mapM_ (addVarAnyType . fst) vs
                       verifyVarExpr ve e
   Or e1 e2      -> do iots1 <- verifyVarExpr ve e1 -- 
                       iots2 <- verifyVarExpr ve e2
@@ -1480,7 +1480,7 @@ isUnsatisfiable bexp = do
     then do
       fname  <- getCurrentFuncName
       vts <- fmap (map (\(v,te,_) -> (v,te))) getVarExps
-      let allvs    = allFreeVars bexp
+      let allvs    = allUnboundVars bexp
       let vtypes   = filter ((`elem` allvs) . fst) vts
           question = "Verifying function " ++ snd fname ++ ":\n\n" ++
                      "IS\n  " ++ showSimpExp bexp ++ "\nUNSATISFIABLE?"

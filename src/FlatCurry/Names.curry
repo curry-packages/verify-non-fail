@@ -3,12 +3,11 @@
 --- together with their SMT names.
 ---
 --- @author  Michael Hanus
---- @version September 2024
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module FlatCurry.Names where
 
-import FlatCurry.Build ( pre )
 import FlatCurry.Types
 import qualified FlatCurry.Names2SMT
 

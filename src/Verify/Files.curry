@@ -7,7 +7,7 @@
 --- is usually `~/.curry_verify_cache/<CURRYSYSTEM>/...`.
 ---
 --- @author Michael Hanus
---- @version January 2025
+--- @version November 2025
 -----------------------------------------------------------------------------
 
 module Verify.Files
@@ -28,7 +28,7 @@ import AbstractCurry.Build
 import AbstractCurry.Files  ( readCurry )
 import AbstractCurry.Pretty ( showCProg )
 import AbstractCurry.Select
-import AbstractCurry.Types hiding ( pre )
+import AbstractCurry.Types
 import Analysis.TermDomain  ( TermDomain )
 import Contract.Names       ( decodeContractName, encodeContractName )
 import Data.Time            ( ClockTime, compareClockTime )
@@ -45,7 +45,6 @@ import System.IO            -- for ReadWrite instances
 import System.IOExts        ( evalCmd, readCompleteFile )
 import System.Process       ( system )
 
-import FlatCurry.Build      ( pre )
 import PackageConfig        ( getPackagePath )
 import Verify.CallTypes
 import Verify.Helpers

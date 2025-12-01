@@ -158,9 +158,9 @@ inOutATypeExpr tst exp = case exp of
                      else let argtypes = map (valuesOfIOT . inOutATypeExpr tst)
                                              es
                           in IOT [(cpatAsAType, aCons qf argtypes)]
-  Let vs e      -> inOutATypeExpr (addNewVars (map fst vs) tst) e
+  Let vs e      -> inOutATypeExpr (addNewVars (varsOfLetBind vs) tst) e
                     -- TODO: make let analysis more precise
-  Free vs e     -> inOutATypeExpr (addNewVars vs tst) e
+  Free vs e     -> inOutATypeExpr (addNewVars (map fst vs) tst) e
   Or e1 e2      -> combineIOTs (inOutATypeExpr tst e1)
                                (inOutATypeExpr tst e2)
   Case _ ce bs  -> case ce of

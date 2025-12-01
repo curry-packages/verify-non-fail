@@ -130,7 +130,7 @@ funcsInExpr e =
   combtype ct qn = case ct of FuncCall       -> (qn:)
                               FuncPartCall _ -> (qn:)
                               _              -> id
-  lt bs exp = exp . foldr (.) id (map (\ (_,ns) -> ns) bs)
+  lt bs exp = exp . foldr (.) id (map (\ (_,_,ns) -> ns) bs)
   fr _ exp = exp
   cas _ exp bs = exp . foldr (.) id bs
   branch _ exp = exp

@@ -29,9 +29,9 @@ normalizeLet exp = case exp of
 
 -- Sort a list of let bindings into strongly connected compontents
 -- sorted by the dependencies of the defined variables.
-sortLetBindings :: [(Int,Expr)] -> [[(Int,Expr)]]
+sortLetBindings :: [(Int,TypeExpr,Expr)] -> [[(Int,TypeExpr,Expr)]]
 sortLetBindings bs = scc definedBy usedIn bs
  where
-  definedBy (v,_) = [v]
+  definedBy (v,_,_) = [v]
 
-  usedIn (_,e) = filter (`elem` map fst bs) (allVars e)
+  usedIn (_,_,e) = filter (`elem` varsOfLetBind bs) (allVars e)

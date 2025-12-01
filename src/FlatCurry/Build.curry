@@ -2,7 +2,7 @@
 --- Auxiliaries to build FlatCurry types and expressions.
 ---
 --- @author  Michael Hanus
---- @version December 2023
+--- @version November 2025
 ---------------------------------------------------------------------------
 
 module FlatCurry.Build
@@ -87,10 +87,5 @@ fcEqu e1 e2 = Comb FuncCall (pre "==") [e1,e2]
 -- `Prelude.failed`
 fcFailed :: Expr
 fcFailed = Comb FuncCall (pre "failed") []
-
-----------------------------------------------------------------------------
---- Transform name into Prelude-qualified name.
-pre :: String -> QName
-pre f = ("Prelude",f)
 
 ----------------------------------------------------------------------------
